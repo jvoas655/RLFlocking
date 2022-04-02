@@ -117,22 +117,42 @@ class FlockEnviroment:
         timestep_neighbors = self.position_kd_tree.query(self.agent_positions, k = self.neighbor_view_count + 1)[1][:, 1:]
         # Assume zero acceleration
         self.agent_accelerations[:, :] = 0
+        y_align_rotations = np.zeros((self.num_agents, self.dimensions, self.dimensions))
+        y_align_rotations[:, 0, :] = self.agent_velocities
+        y_align_rotations[:, 1, 0] = -1 * self.agent_velocities[:, 1]
+        y_align_rotations[:, 1, 1] = self.agent_velocities[:, 0]
+        y_align_rotation_norms2 = np.sqrt(np.sum(self.agent_velocities**2, axis = 1))
+
         for agent_ind in range(self.num_agents):
             # Get air flow at agents binned location
             self.agent_airflows[agent_ind, :] = self.airflow_store[timestep_agent_bin_locations[agent_ind, 0], timestep_agent_bin_locations[agent_ind, 1], :]
             # If agent is out of energy it can not accelerate
             if (self.agent_energies[agent_ind] > 0):
                 # Setup state value to obtain acceleration
-                # First two states are agent velocity
-                # Second two states are airflow at agent location
+                # First two states are agent position
+                # Second two states are agent velocity. This state and all following states are rotated to match the agents velocity to [1, 0] for symetry
+                # Third two states are airflow at agent location
                 # Next batch of states is the reletive positions of all nearest agents
                 # Final batch of states is the velocity of all nearest agents
-                timestep_state = np.zeros((2 + self.neighbor_view_count * 2) * self.dimensions)
-                timestep_state[:self.dimensions] = self.agent_velocities[agent_ind]
-                timestep_state[self.dimensions:self.dimensions * 2] = self.agent_airflows[agent_ind, :]
-                timestep_state[self.dimensions * 2: self.dimensions * (2 + self.neighbor_view_count)] = (self.agent_positions[timestep_neighbors[agent_ind, :]] - self.agent_positions[agent_ind]).flatten()
-                timestep_state[self.dimensions * (2 + self.neighbor_view_count):] = self.agent_velocities[timestep_neighbors[agent_ind, :]].flatten()
-                # Should query model for acceleration decision and apply any limits here
+                timestep_state = np.zeros(((3 + self.neighbor_view_count * 2), self.dimensions))
+                state_ind = 0
+                if (y_align_rotation_norms2[agent_ind] != 0):
+                    y_align_agent_rotation = y_align_rotations[agent_ind, :, :] / y_align_rotation_norms2[agent_ind]
+                else:
+                    y_align_agent_rotation = np.identity(self.dimensions)
+                timestep_state[state_ind, :] = np.flip(np.matmul(y_align_agent_rotation, self.agent_velocities[agent_ind]))
+                state_ind += 1
+                timestep_state[state_ind, :] = self.agent_positions[agent_ind]
+                state_ind += 1
+                timestep_state[state_ind, :] = np.matmul(y_align_agent_rotation, self.agent_airflows[agent_ind, :])
+                state_ind += 1
+                for neighbor in range(self.neighbor_view_count):
+                    timestep_state[state_ind, :] = np.matmul(y_align_agent_rotation, ((self.agent_positions[timestep_neighbors[agent_ind, neighbor]] - self.agent_positions[agent_ind])))
+                    state_ind += 1
+                    timestep_state[state_ind, :] = np.matmul(y_align_agent_rotation, self.agent_velocities[timestep_neighbors[agent_ind, neighbor]])
+                    state_ind += 1
+                timestep_state = timestep_state.flatten()[1:] # Throw away zero velocity since its always rotated to be along [1, 0]
+                # Should query model for acceleration decision and apply any limits here. May need to apply rotation afterwards here
                 self.agent_accelerations[agent_ind, :] = (np.random.random(2) - 0.5) * 0.01 + -1 * (self.agent_positions[agent_ind, :] - 0.5) * np.random.random(1) * 0.002 # Pseudo random acceleration for now, with a bias towards center
         # Get effective airflow at location reletive to agent velocity
         airflow_velocity_difference = self.agent_airflows - self.agent_velocities
