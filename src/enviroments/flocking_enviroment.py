@@ -87,7 +87,7 @@ class FlockEnviroment:
             print("State view ({view:d}) is larger then the number of other agents ({agents:d})".format(view = self.neighbor_view_count, agents = self.num_agents - 1))
 
     def get_observation_size(self):
-        return ((3 + self.neighbor_view_count * 2) * self.dimensions)
+        return ((3 + self.neighbor_view_count * 2) * self.dimensions) -1
     def reset(self):
         # Initialize agent properties
         self.agent_positions = np.random.random((self.num_agents, self.dimensions))
@@ -148,10 +148,10 @@ class FlockEnviroment:
                 # Third two states are airflow at agent location
                 # Next batch of states is the reletive positions of all nearest agents
                 # Final batch of states is the velocity of all nearest agents
-                timestep_state = np.zeros(((3 + self.neighbor_view_count * 2), self.dimensions))
+                timestep_state = np.zeros(self.get_observation_size() + 1).reshape(-1, self.dimensions)
                 state_ind = 0
 
-                '''
+
                 if (y_align_rotation_norms2[agent_ind] != 0):
                     y_align_agent_rotation = y_align_rotations[agent_ind, :, :] / y_align_rotation_norms2[agent_ind]
                     self.inverse_rotations[agent_ind] = np.linalg.inv(y_align_agent_rotation)
@@ -183,7 +183,7 @@ class FlockEnviroment:
                     timestep_state[state_ind, :] = self.agent_velocities[timestep_neighbors[agent_ind, neighbor]]
                     state_ind += 1
                 timestep_state = timestep_state.flatten() # Throw away zero velocity since its always rotated to be along [1, 0]
-
+                '''
                 self.observation_collection[agent_ind, :] = timestep_state
 
     def step(self, actions):
@@ -191,8 +191,8 @@ class FlockEnviroment:
         self.agent_accelerations[:, :] = 0
         for agent_ind in range(self.num_agents):
             if (self.agent_energies[agent_ind] > 0):
-                #self.agent_accelerations[agent_ind, :] = np.matmul(self.inverse_rotations[agent_ind], actions[agent_ind, :])
-                self.agent_accelerations[agent_ind, :] = actions[agent_ind, :]
+                self.agent_accelerations[agent_ind, :] = np.matmul(self.inverse_rotations[agent_ind], actions[agent_ind, :])
+                #self.agent_accelerations[agent_ind, :] = actions[agent_ind, :]
         self.agent_accelerations *= self.acceleration_scale
                 # Should query model for acceleration decision and apply any limits here. May need to apply rotation afterwards here
                 # Pseudo random acceleration for now, with a bias towards center
