@@ -22,6 +22,6 @@ class FFNA(Actor):
         result = __activations__[self.activation](self.FC1(obs))
         result = __activations__[self.activation](self.FC2(result))
         result = self.FC3(result)
-        norms = torch.clip(torch.linalg.norm(result, dim=1), min = 1.0).view(-1, 1)
-        result = torch.div(result, norms)
+        #norms = torch.clip(torch.linalg.norm(result, dim=1), min = 1.0).view(-1, 1)
+        #result = torch.div(result, norms)
         return result
