@@ -9,11 +9,11 @@ from MADDPG import *
 if __name__ == "__main__":
     # Arguments
     parser = argparse.ArgumentParser()
-    parser.add_argument("--num_agents", type=int, default=50)
+    parser.add_argument("--num_agents", type=int, default=20)
     parser.add_argument("--num_episodes", type=int, default=1000)
-    parser.add_argument("--batch_size", type=int, default=256)
+    parser.add_argument("--batch_size", type=int, default=32)
     parser.add_argument("--memory_capacity", type=int, default=10000, help="Maximum number of memory replays to store.")
-    parser.add_argument("--pre_train_eps", type=int, default=10, help="Number of episodes to run before starting training. Allows memory to be built up.")
+    parser.add_argument("--pre_train_eps", type=int, default=1, help="Number of episodes to run before starting training. Allows memory to be built up.")
     # Model arguments
     args = parser.parse_args()
 
@@ -27,7 +27,10 @@ if __name__ == "__main__":
         state = env.reset()
         done = False
         while(not done):
-            actions = algo.select_action(state)
-            _, _, state, done = env.step(actions.detach().cpu().numpy())
+            actions = algo.select_action(algo.to_float_tensor(state))
+            old_state, rewards, state, done = env.step(actions.clone().detach().cpu().numpy())
+            algo.memory.push(old_state, actions,\
+                state, rewards)
         algo.episode_done += 1
+        algo.update_policy()
         #env.display_last_episode()

@@ -59,30 +59,35 @@ class MADDPG:
 
         self.steps_done = 0
         self.episode_done = 0
+        #torch.autograd.set_detect_anomaly(True)
 
     def update_policy(self):
         # do not train until exploration is enough
         if self.episode_done <= self.episodes_before_train:
             return None, None
 
-        ByteTensor = torch.cuda.ByteTensor if self.use_cuda else torch.ByteTensor
+        BoolTensor = torch.cuda.BoolTensor if self.use_cuda else torch.BoolTensor
         FloatTensor = torch.cuda.FloatTensor if self.use_cuda else torch.FloatTensor
 
         c_loss = []
         a_loss = []
         for agent in range(self.n_agents):
+            print("---", agent, "/", self.n_agents)
             transitions = self.memory.sample(self.batch_size)
             batch = Experience(*zip(*transitions))
-            non_final_mask = ByteTensor(list(map(lambda s: s is not None,
+            non_final_mask = BoolTensor(list(map(lambda s: s is not None,
                                                  batch.next_states)))
+            state_batch = list(map(lambda s: FloatTensor(s), batch.states))
+            action_batch = batch.actions
+            reward_batch = list(map(lambda s: FloatTensor(s), batch.rewards))
             # state_batch: batch_size x n_agents x dim_obs
-            state_batch = torch.stack(batch.states).type(FloatTensor)
-            action_batch = torch.stack(batch.actions).type(FloatTensor)
-            reward_batch = torch.stack(batch.rewards).type(FloatTensor)
+            state_batch = torch.stack(state_batch)
+            action_batch = torch.stack(action_batch)
+            reward_batch = torch.stack(reward_batch)
             # : (batch_size_non_final) x n_agents x dim_obs
             non_final_next_states = torch.stack(
-                [s for s in batch.next_states
-                 if s is not None]).type(FloatTensor)
+                [FloatTensor(s) for s in batch.next_states
+                 if s is not None])
 
             # for current agent
             whole_state = state_batch.view(self.batch_size, -1)
@@ -112,21 +117,25 @@ class MADDPG:
 
             target_Q = (target_Q.unsqueeze(1) * self.GAMMA) + (
                 reward_batch[:, agent].unsqueeze(1) * 0.01)
-
             loss_Q = nn.MSELoss()(current_Q, target_Q.detach())
-            loss_Q.backward()
+            loss_Q.backward(retain_graph=True)
             self.critic_optimizer[agent].step()
+
 
             self.actor_optimizer[agent].zero_grad()
             state_i = state_batch[:, agent, :]
             action_i = self.actors[agent](state_i)
             ac = action_batch.clone()
-            ac[:, agent, :] = action_i
+            mask = torch.zeros(ac.shape, device=ac.device, dtype=torch.bool)
+            mask[:, agent, :] = True
+            ac = ac.masked_scatter(mask, action_i.clone())
             whole_action = ac.view(self.batch_size, -1)
             actor_loss = -self.critics[agent](whole_state, whole_action)
             actor_loss = actor_loss.mean()
-            actor_loss.backward()
-            self.actor_optimizer[agent].step()
+
+            actor_loss.backward(retain_graph=True)
+            #self.actor_optimizer[agent].step()
+
             c_loss.append(loss_Q)
             a_loss.append(actor_loss)
 
@@ -136,13 +145,17 @@ class MADDPG:
                 soft_update(self.actors_target[i], self.actors[i], self.tau)
 
         return c_loss, a_loss
+    def to_float_tensor(self, data):
+        FloatTensor = torch.cuda.FloatTensor if self.use_cuda else torch.FloatTensor
+        data = FloatTensor(data)
+        return data
 
     def select_action(self, state_batch):
         # state_batch: n_agents x state_dim
+        FloatTensor = torch.cuda.FloatTensor if self.use_cuda else torch.FloatTensor
         actions = torch.zeros(
             self.n_agents,
-            self.n_actions)
-        FloatTensor = torch.cuda.FloatTensor if self.use_cuda else torch.FloatTensor
+            self.n_actions).type(FloatTensor)
         state_batch = FloatTensor(state_batch)
         for i in range(self.n_agents):
             sb = state_batch[i, :].detach()
@@ -150,14 +163,10 @@ class MADDPG:
             act += torch.from_numpy(
                 (np.random.randn(2) * 2 - 1) * self.var[i]).type(FloatTensor)
             act_norm = torch.clamp(torch.linalg.norm(act), min=1.0)
-            act /= act_norm
-
-
+            act = torch.div(act, act_norm)
             if self.episode_done > self.episodes_before_train and\
                self.var[i] > 0.005:
                 self.var[i] *= 0.999998
-
-            actions[i, :] = act
+            actions[i, :] = act.clone()
         self.steps_done += 1
-
         return actions
