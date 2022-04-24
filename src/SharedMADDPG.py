@@ -42,8 +42,8 @@ class SharedMADDPG:
         self.tau = 0.01
 
         self.var = 0.1
-        self.critic_optimizer = Adam(self.critic.parameters(), lr=0.1)
-        self.actor_optimizer = Adam(self.actor.parameters(), lr=0.01)
+        self.critic_optimizer = Adam(self.critic.parameters(), lr=0.01)
+        self.actor_optimizer = Adam(self.actor.parameters(), lr=0.001)
 
         if self.use_cuda:
             self.actor.cuda()
@@ -75,9 +75,6 @@ class SharedMADDPG:
             reward_batch = list(map(lambda s: FloatTensor(s), batch.rewards))
             # state_batch: batch_size x n_agents x dim_obs
             state_batch = torch.stack(state_batch)
-            print("state batch mean", torch.mean(state_batch))
-            print("state batch var", torch.var(state_batch))
-            print("state batch shape", state_batch.shape)
             action_batch = torch.stack(action_batch)
             reward_batch = torch.stack(reward_batch)
             # : (batch_size_non_final) x n_agents x dim_obs
@@ -120,6 +117,7 @@ class SharedMADDPG:
 
             self.actor_optimizer.zero_grad()
             state_i = state_batch[:, agent, :]
+            print(agent, state_i[0])
             action_i = self.actor(state_i)
             ac = action_batch.clone()
             mask = torch.zeros(ac.shape, device=ac.device, dtype=torch.bool)
