@@ -56,6 +56,11 @@ class FlockEnviroment:
         self.maximum_velocity = 0.05
         self.acceleration_scale = 0.1
         self.dimensions = 2 # Keep at 2 for now
+
+
+        """"""
+        self.with_boundary_observation = False 
+
         if (physics_params):
             if ("airflow_bin_size" in physics_params):
                 self.airflow_bin_size = physics_params["airflow_bin_size"]
@@ -87,7 +92,12 @@ class FlockEnviroment:
             print("State view ({view:d}) is larger then the number of other agents ({agents:d})".format(view = self.neighbor_view_count, agents = self.num_agents - 1))
 
     def get_observation_size(self):
-        return ((3 + self.neighbor_view_count * 2) * self.dimensions) -1
+        if self.with_boundary_observation:
+            return ((3 + self.neighbor_view_count * 2) * self.dimensions) + 2 * self.dimensions - 1
+        else:
+            return ((3 + self.neighbor_view_count * 2) * self.dimensions) -1
+        
+
     def reset(self):
         # Initialize agent properties
         self.agent_positions = np.random.random((self.num_agents, self.dimensions))
@@ -164,6 +174,18 @@ class FlockEnviroment:
                 state_ind += 1
                 timestep_state[state_ind, :] = np.matmul(y_align_agent_rotation, self.agent_airflows[agent_ind, :])
                 state_ind += 1
+                
+                """ Add distance to box boundaries
+                """
+                if self.with_boundary_observation:
+                    for d in range(self.dimensions):
+                        timestep_state[state_ind, :] = self.agent_positions[agent_ind][d] - 0.
+                        state_ind += 1
+                        timestep_state[state_ind, :] = self.agent_positions[agent_ind][d] - 1.
+                        state_ind += 1
+
+
+
                 for neighbor in range(self.neighbor_view_count):
                     timestep_state[state_ind, :] = np.matmul(y_align_agent_rotation, ((self.agent_positions[timestep_neighbors[agent_ind, neighbor]] - self.agent_positions[agent_ind])))
                     state_ind += 1
