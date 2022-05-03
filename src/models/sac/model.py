@@ -170,24 +170,27 @@ class DiscretePolicy(nn.Module):
         self.linear1 = nn.Linear(num_inputs, hidden_dim)
         self.linear2 = nn.Linear(hidden_dim, hidden_dim)
 
-        self.mean = nn.Linear(hidden_dim, num_actions)
+        # self.mean = nn.Linear(hidden_dim, num_actions)
+        self.mean = nn.Linear(hidden_dim, 9)
         # self.noise = torch.Tensor(num_actions)
         self.m = nn.Softmax(dim=1)
 
 
         self.apply(weights_init_)
-        
+
         norm = 0.1
-        embedding_weights = [torch.FloatTensor([0, 0]), torch.FloatTensor([0, 1]),
-                             torch.sqrt(torch.FloatTensor([0.5, 0.5])), 
+        embedding_weights = [torch.FloatTensor([0, 0]),
+                             torch.FloatTensor([0, 1]),
+                             torch.sqrt(torch.tensor(0.5)) * (torch.FloatTensor([1, 1])), 
                              torch.FloatTensor([1, 0]),
-                             torch.sqrt(torch.FloatTensor([0.5, -0.5])), 
+                             torch.sqrt(torch.tensor(0.5)) * (torch.FloatTensor([1, -1])), 
                              torch.FloatTensor([0, -1]),
-                             torch.sqrt(torch.FloatTensor([-0.5, -0.5])),
+                             torch.sqrt(torch.tensor(0.5)) * (torch.FloatTensor([-1, -1])), 
                              torch.FloatTensor([-1, 0]),
-                             torch.sqrt(torch.FloatTensor([-0.5, 0.5]))]
+                             torch.sqrt(torch.tensor(0.5)) * (torch.FloatTensor([-1, 1]))]
+
         embedding_weights = torch.stack(embedding_weights) * norm
-        self.embedding = nn.Embedding(8, 2)
+        self.embedding = nn.Embedding(9, 2)
         self.embedding.weight = torch.nn.Parameter(embedding_weights)
         self.embedding.weight.requires_grad = False 
         
