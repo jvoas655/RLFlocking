@@ -35,7 +35,8 @@ class MADDPG:
         self.n_actions = dim_act
         self.memory = ReplayMemory(capacity)
         self.batch_size = batch_size
-        self.use_cuda = torch.cuda.is_available()
+        # self.use_cuda = torch.cuda.is_available()
+        self.use_cuda = False
         self.episodes_before_train = episodes_before_train
 
         self.GAMMA = 0.95
@@ -65,7 +66,7 @@ class MADDPG:
         # do not train until exploration is enough
         if self.episode_done <= self.episodes_before_train:
             return None, None
-
+        print("update")
         BoolTensor = torch.cuda.BoolTensor if self.use_cuda else torch.BoolTensor
         FloatTensor = torch.cuda.FloatTensor if self.use_cuda else torch.FloatTensor
 
@@ -172,3 +173,11 @@ class MADDPG:
             actions = actions.masked_scatter(mask, act.clone())
         self.steps_done += 1
         return actions
+
+
+
+
+
+
+
+

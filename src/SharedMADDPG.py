@@ -6,6 +6,7 @@ from memory import ReplayMemory, Experience
 from torch.optim import Adam
 import torch.nn as nn
 import numpy as np
+from utils.helpers import get_device
 
 
 def soft_update(target, source, t):
@@ -22,7 +23,7 @@ def hard_update(target, source):
 
 class SharedMADDPG:
     def __init__(self, n_agents, dim_obs, dim_act, batch_size,
-                 capacity, episodes_before_train):
+                 capacity, episodes_before_train, gpu_id=3):
         # self.actors = [FFNA(dim_obs, dim_act) for i in range(n_agents)]
         self.actor = FFNA(dim_obs, dim_act)
         self.critic = FFNC(n_agents, dim_obs, dim_act)
@@ -34,8 +35,8 @@ class SharedMADDPG:
         self.n_actions = dim_act
         self.memory = ReplayMemory(capacity)
         self.batch_size = batch_size
-        # self.use_cuda = torch.cuda.is_available()
-        self.use_cuda = False 
+        self.use_cuda = torch.cuda.is_available()
+        # self.use_cuda = False 
         self.episodes_before_train = episodes_before_train
 
         self.GAMMA = 0.95
@@ -45,11 +46,12 @@ class SharedMADDPG:
         self.critic_optimizer = Adam(self.critic.parameters(), lr=0.01)
         self.actor_optimizer = Adam(self.actor.parameters(), lr=0.001)
 
-        if self.use_cuda:
-            self.actor.cuda()
-            self.critic.cuda()
-            self.actor_target.cuda()
-            self.critic_target.cuda()
+        # self.device = torch.device(get_device(gpu_id))
+        self.device = "cpu"
+        self.actor.to(self.device)
+        self.critic.to(self.device)
+        self.actor_target.to(self.device)
+        self.critic_target.to(self.device)
 
         self.steps_done = 0
         self.episode_done = 0
@@ -59,27 +61,26 @@ class SharedMADDPG:
         # do not train until exploration is enough
         if self.episode_done <= self.episodes_before_train:
             return None, None
-        print("update")
-        BoolTensor = torch.cuda.BoolTensor if self.use_cuda else torch.BoolTensor
-        FloatTensor = torch.cuda.FloatTensor if self.use_cuda else torch.FloatTensor
+        # BoolTensor = torch.cuda.BoolTensor if self.use_cuda else torch.BoolTensor
+        # FloatTensor = torch.cuda.FloatTensor if self.use_cuda else torch.FloatTensor
 
         c_loss = []
         a_loss = []
         for agent in range(self.n_agents):
             transitions = self.memory.sample(self.batch_size)
             batch = Experience(*zip(*transitions))
-            non_final_mask = BoolTensor(list(map(lambda s: s is not None,
-                                                 batch.next_states)))
-            state_batch = list(map(lambda s: FloatTensor(s), batch.states))
+            non_final_mask = torch.BoolTensor(list(map(lambda s: s is not None,
+                                              batch.next_states))).to(self.device)
+            state_batch = list(map(lambda s: torch.FloatTensor(s).to(self.device), batch.states))
             action_batch = batch.actions
-            reward_batch = list(map(lambda s: FloatTensor(s), batch.rewards))
+            reward_batch = list(map(lambda s: torch.FloatTensor(s).to(self.device), batch.rewards))
             # state_batch: batch_size x n_agents x dim_obs
             state_batch = torch.stack(state_batch)
             action_batch = torch.stack(action_batch)
             reward_batch = torch.stack(reward_batch)
             # : (batch_size_non_final) x n_agents x dim_obs
             non_final_next_states = torch.stack(
-                [FloatTensor(s) for s in batch.next_states
+                [torch.FloatTensor(s).to(self.device) for s in batch.next_states
                  if s is not None])
 
             # for current agent
@@ -99,7 +100,7 @@ class SharedMADDPG:
                                                  1).contiguous())
 
             target_Q = torch.zeros(
-                self.batch_size).type(FloatTensor)
+                self.batch_size).to(self.device)# .type(FloatTensor)
 
             target_Q[non_final_mask] = self.critic_target(
                 non_final_next_states.view(-1, self.n_agents * self.n_states),
@@ -117,7 +118,6 @@ class SharedMADDPG:
 
             self.actor_optimizer.zero_grad()
             state_i = state_batch[:, agent, :]
-            print(agent, state_i[0])
             action_i = self.actor(state_i)
             ac = action_batch.clone()
             mask = torch.zeros(ac.shape, device=ac.device, dtype=torch.bool)
@@ -141,17 +141,18 @@ class SharedMADDPG:
 
         return c_loss, a_loss
     def to_float_tensor(self, data):
-        FloatTensor = torch.cuda.FloatTensor if self.use_cuda else torch.FloatTensor
-        data = FloatTensor(data)
+        # FloatTensor = torch.cuda.FloatTensor if self.use_cuda else torch.FloatTensor
+        # data = FloatTensor(data)
+        data = torch.FloatTensor(data).to(self.device)
         return data
 
     def select_action(self, state_batch):
         # state_batch: n_agents x state_dim
-        FloatTensor = torch.cuda.FloatTensor if self.use_cuda else torch.FloatTensor
+        # FloatTensor = torch.cuda.FloatTensor if self.use_cuda else torch.FloatTensor
         actions = torch.zeros(
             self.n_agents,
-            self.n_actions).type(FloatTensor)
-        state_batch = FloatTensor(state_batch)
+            self.n_actions).to(self.device)# .type(FloatTensor)
+        state_batch = state_batch.to(self.device)
         for i in range(self.n_agents):
             sb = state_batch[i, :].detach()
             act = self.actor(sb.unsqueeze(0)).squeeze()

@@ -1,4 +1,6 @@
 import numpy as np
+import matplotlib
+# matplotlib.use('TkAgg')
 import matplotlib.pyplot as plt
 import matplotlib.animation as animation
 import math
@@ -50,7 +52,7 @@ class FlockEnviroment:
         self.airflow_conv_spread = 1 # Determines air flow spread range
         self.impact_energy_cost = 0.10 # Energy cost per impact
         self.impact_velocity_decay = 0.9 # How much velocity is lost on collisions
-        self.neighbor_view_count = 10 # Number of nearest neighbors visible
+        self.neighbor_view_count = 10 # 4 # Number of nearest neighbors visible
         self.base_energy_cost = 0.01 # Base energy that is taken to move at each time time_step
         self.airflow_assist_factor = 0.9 # How much airflow can increase/decrease energy usage
         self.maximum_velocity = 0.05
@@ -235,6 +237,15 @@ class FlockEnviroment:
         timestep_position_intersects = intersects(timestep_position_segment_pairs)
         timestep_agent_collisions += np.bincount(potential_pairs[timestep_position_intersects].reshape(-1,), minlength=self.num_agents)
         self.reward_collection = -1 * timestep_agent_collisions
+        
+         
+        def closeness_penalty(d, max_p=1, thres=0.05):
+            shape = d.shape
+            return np.minimum(np.zeros(shape), (-max_p + max_p * d / thres) * np.ones(shape))
+        nearest_dist, _ = self.position_kd_tree.query(self.agent_positions, k=2)
+        self.reward_collection += closeness_penalty(nearest_dist[:,1])
+        
+        
         # Subtract energy based on number of collisions (agent-agent, agent-wall) in this timestep
         self.agent_energies -= timestep_agent_collisions * self.impact_energy_cost
         # Perform convolution in swap array to spread airflow for this time step

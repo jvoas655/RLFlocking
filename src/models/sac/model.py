@@ -13,6 +13,11 @@ def weights_init_(m):
         torch.nn.init.xavier_uniform_(m.weight, gain=1)
         torch.nn.init.constant_(m.bias, 0)
 
+def kaiming_init_(m):
+    if isinstance(m, nn.Linear):
+        torch.nn.init.kaiming_uniform_(m.weight)
+        torch.nn.init.constant_(m.bias, 0)
+
 
 class ValueNetwork(nn.Module):
     def __init__(self, num_inputs, hidden_dim):
@@ -157,3 +162,211 @@ class DeterministicPolicy(nn.Module):
         self.action_bias = self.action_bias.to(device)
         self.noise = self.noise.to(device)
         return super(DeterministicPolicy, self).to(device)
+
+
+class DiscretePolicy(nn.Module):
+    def __init__(self, num_inputs, num_actions, hidden_dim, action_space=None):
+        super(DiscretePolicy, self).__init__()
+        self.linear1 = nn.Linear(num_inputs, hidden_dim)
+        self.linear2 = nn.Linear(hidden_dim, hidden_dim)
+
+        self.mean = nn.Linear(hidden_dim, num_actions)
+        # self.noise = torch.Tensor(num_actions)
+        self.m = nn.Softmax(dim=1)
+
+
+        self.apply(weights_init_)
+        
+        norm = 0.1
+        embedding_weights = [torch.FloatTensor([0, 0]), torch.FloatTensor([0, 1]),
+                             torch.sqrt(torch.FloatTensor([0.5, 0.5])), 
+                             torch.FloatTensor([1, 0]),
+                             torch.sqrt(torch.FloatTensor([0.5, -0.5])), 
+                             torch.FloatTensor([0, -1]),
+                             torch.sqrt(torch.FloatTensor([-0.5, -0.5])),
+                             torch.FloatTensor([-1, 0]),
+                             torch.sqrt(torch.FloatTensor([-0.5, 0.5]))]
+        embedding_weights = torch.stack(embedding_weights) * norm
+        self.embedding = nn.Embedding(8, 2)
+        self.embedding.weight = torch.nn.Parameter(embedding_weights)
+        self.embedding.weight.requires_grad = False 
+        
+
+
+
+    def forward(self, state):
+        x = F.relu(self.linear1(state))
+        x = F.relu(self.linear2(x))
+        return self.m(self.mean(x))
+
+    def sample(self, state):
+        prob = self.forward(state)
+        action = torch.multinomial(prob, num_samples=1).squeeze(1)
+        maxact = torch.argmax(prob, dim=1)
+        # print("prob", prob)
+        # print("act", action, action.shape)
+        # print("maxact", maxact, maxact.shape)
+        return self.embedding(action), torch.tensor(0.), self.embedding(maxact)
+
+    def to(self, device):
+        return super(DiscretePolicy, self).to(device)
+
+"""
+policy = DiscretePolicy(45, 2, 64)
+state = torch.rand(2, 45)
+act, _, maxact = policy.sample(state)
+print("act embedding", act, act.shape)
+print("max act embedding", maxact, maxact.shape)
+"""
+
+
+
+
+class QVFN(nn.Module):
+    def __init__(self, num_agents, num_inputs, num_actions, hidden_dim):
+        super(QVFN, self).__init__()
+        
+        self.num_agents = num_agents
+        self.num_inputs = num_inputs
+        self.num_actions = num_actions
+        # Q1 architecture
+        # self.q1_list = nn.ModuleList([nn.Sequential(nn.Linear(num_inputs + num_actions, hidden_dim),
+        #                               nn.ReLU(inplace=True),
+        #                               nn.Linear(hidden_dim, hidden_dim),
+        #                               nn.ReLU(inplace=True),
+        #                               nn.Linear(hidden_dim, 1)) for _ in range(num_agents)])
+        
+        self.q1 = nn.Sequential(nn.Linear(num_inputs + num_actions, hidden_dim),
+                                     nn.ReLU(inplace=True),
+                                     nn.Linear(hidden_dim, hidden_dim),
+                                     nn.ReLU(inplace=True),
+                                     nn.Linear(hidden_dim, 1))
+
+        # Q2 architecture
+        # self.q2_list = nn.ModuleList([nn.Sequential(nn.Linear(num_inputs + num_actions, hidden_dim),
+        #                               nn.ReLU(inplace=True),
+        #                               nn.Linear(hidden_dim, hidden_dim),
+        #                               nn.ReLU(inplace=True),
+        #                               nn.Linear(hidden_dim, 1)) for _ in range(num_agents)])
+        self.q2 = nn.Sequential(nn.Linear(num_inputs + num_actions, hidden_dim),
+                                     nn.ReLU(inplace=True),
+                                     nn.Linear(hidden_dim, hidden_dim),
+                                     nn.ReLU(inplace=True),
+                                     nn.Linear(hidden_dim, 1))
+
+        self.apply(weights_init_)
+
+    def forward(self, state, action): # don't flatten state: num_agents * observation space (45), action: num_agents * action space (2)
+        xu = torch.cat([state, action], dim=2)
+       
+        x1 = 0
+        for agent in range(self.num_agents):
+            x1 += self.q1(xu[:,agent,:])
+
+        x2 = 0
+        for agent in range(self.num_agents):
+            # xb = xu[:,agent,:]
+            # xb = self.q2_list[agent](xb)
+            x2 += self.q2(xu[:,agent,:])
+
+        return x1, x2
+
+
+class QVFNMinimal(nn.Module):
+    def __init__(self, num_agents, num_inputs, num_actions, hidden_dim=64):
+        super(QVFNMinimal, self).__init__()
+        
+        self.num_agents = num_agents
+        self.num_inputs = num_inputs
+        self.num_actions = num_actions
+        # Q1 architecture
+        # self.q1_list = nn.ModuleList([nn.Sequential(nn.Linear(num_inputs + num_actions, hidden_dim),
+        #                               nn.ReLU(inplace=True),
+        #                               nn.Linear(hidden_dim, hidden_dim),
+        #                               nn.ReLU(inplace=True),
+        #                               nn.Linear(hidden_dim, 1)) for _ in range(num_agents)])
+        
+        self.q1 = nn.Sequential(nn.Linear(num_inputs + num_actions, hidden_dim),
+                                     nn.ReLU(inplace=True),
+                                     nn.Linear(hidden_dim, hidden_dim),
+                                     nn.ReLU(inplace=True),
+                                     nn.Linear(hidden_dim, 1))
+
+        # Q2 architecture
+        # self.q2_list = nn.ModuleList([nn.Sequential(nn.Linear(num_inputs + num_actions, hidden_dim),
+        #                               nn.ReLU(inplace=True),
+        #                               nn.Linear(hidden_dim, hidden_dim),
+        #                               nn.ReLU(inplace=True),
+        #                               nn.Linear(hidden_dim, 1)) for _ in range(num_agents)])
+        self.q2 = nn.Sequential(nn.Linear(num_inputs + num_actions, hidden_dim),
+                                     nn.ReLU(inplace=True),
+                                     nn.Linear(hidden_dim, hidden_dim),
+                                     nn.ReLU(inplace=True),
+                                     nn.Linear(hidden_dim, 1))
+
+        self.apply(weights_init_)
+
+    def forward(self, state, action): # don't flatten state: num_agents * observation space (45), action: num_agents * action space (2)
+        xu = torch.cat([state, action], dim=2)
+       
+        x1 = 0
+        for agent in range(self.num_agents):
+            x1 += self.q1(xu[:,agent,:])
+
+        x2 = 0
+        for agent in range(self.num_agents):
+            # xb = xu[:,agent,:]
+            # xb = self.q2_list[agent](xb)
+            x2 += self.q2(xu[:,agent,:])
+
+        return x1, x2
+
+
+class QVFNKaiming(nn.Module):
+    def __init__(self, num_agents, num_inputs, num_actions, hidden_dim):
+        super(QVFNKaiming, self).__init__()
+        
+        self.num_agents = num_agents
+        self.num_inputs = num_inputs
+        self.num_actions = num_actions
+        # Q1 architecture
+        # self.q1_list = nn.ModuleList([nn.Sequential(nn.Linear(num_inputs + num_actions, hidden_dim),
+        #                               nn.ReLU(inplace=True),
+        #                               nn.Linear(hidden_dim, hidden_dim),
+        #                               nn.ReLU(inplace=True),
+        #                               nn.Linear(hidden_dim, 1)) for _ in range(num_agents)])
+        
+        self.q1 = nn.Sequential(nn.Linear(num_inputs + num_actions, hidden_dim),
+                                     nn.ReLU(inplace=True),
+                                     nn.Linear(hidden_dim, hidden_dim),
+                                     nn.ReLU(inplace=True),
+                                     nn.Linear(hidden_dim, 1))
+
+        # Q2 architecture
+        # self.q2_list = nn.ModuleList([nn.Sequential(nn.Linear(num_inputs + num_actions, hidden_dim),
+        #                               nn.ReLU(inplace=True),
+        #                               nn.Linear(hidden_dim, hidden_dim),
+        #                               nn.ReLU(inplace=True),
+        #                               nn.Linear(hidden_dim, 1)) for _ in range(num_agents)])
+        self.q2 = nn.Sequential(nn.Linear(num_inputs + num_actions, hidden_dim),
+                                     nn.ReLU(inplace=True),
+                                     nn.Linear(hidden_dim, hidden_dim),
+                                     nn.ReLU(inplace=True),
+                                     nn.Linear(hidden_dim, 1))
+
+        self.apply(kaiming_init_)
+
+    def forward(self, state, action): # don't flatten state: num_agents * observation space (45), action: num_agents * action space (2)
+        xu = torch.cat([state, action], dim=2)
+       
+        x1 = 0
+        for agent in range(self.num_agents):
+            x1 += self.q1(xu[:,agent,:])
+
+        x2 = 0
+        for agent in range(self.num_agents):
+            # xb = xu[:,agent,:]
+            # xb = self.q2_list[agent](xb)
+            x2 += self.q2(xu[:,agent,:])
+
+        return x1, x2

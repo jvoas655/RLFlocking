@@ -2,7 +2,7 @@ import os
 import torch
 import torch.nn.functional as F
 from torch.optim import Adam
-from models.sac.model import GaussianPolicy, QNetwork, DeterministicPolicy
+from models.sac.model import GaussianPolicy, QNetwork, DeterministicPolicy, DiscretePolicy, QVFN, QVFNMinimal, QVFNKaiming
 from utils.helpers import get_device
 # from memory import ReplayMemory, Experience
 from models.sac.replay_memory import ReplayMemory
@@ -40,16 +40,16 @@ class SAC(object):
                     target_update_interval=50,
                     automatic_entropy_tuning=False,
                     gpuid=0,
-                    hidden_size=512,
+                    hidden_size= 64,# 512,
                     lr=0.0003,
                     capacity=10000,
-                    batch_size=4):
+                    batch_size=256):
         self.n_agents = n_agents
         self.n_states = num_inputs
         self.n_actions = action_space.shape[0]
         self.gamma = 0.95 
         self.tau = 0.01 
-        self.alpha = 0.2 
+        self.alpha = 0.1 
         self.episode_done = 0
         self.episodes_before_train = 10 
         self.steps_done = 0
@@ -59,13 +59,20 @@ class SAC(object):
         self.automatic_entropy_tuning = automatic_entropy_tuning 
         self.memory = ReplayMemory(capacity, 42)
         self.batch_size = batch_size
-        # self.device = get_device(gpuid)
-        self.device = "cpu" 
+        self.device = get_device(gpuid)
+        # print("self device", self.device)
+        # self.device = "cpu" 
 
-        self.critic = QNetwork(n_agents, num_inputs, action_space.shape[0], hidden_size).to(device=self.device)
+        # self.critic = QNetwork(n_agents, num_inputs, action_space.shape[0], hidden_size).to(device=self.device)
+        # self.critic = QVFN(n_agents, num_inputs, action_space.shape[0], hidden_size).to(device=self.device)
+        self.critic = QVFNMinimal(n_agents, num_inputs, action_space.shape[0], hidden_size).to(device=self.device)
+        # self.critic = QVFNKaiming(n_agents, num_inputs, action_space.shape[0], hidden_size).to(device=self.device)
         self.critic_optim = Adam(self.critic.parameters(), lr=lr)
 
-        self.critic_target = QNetwork(n_agents, num_inputs, action_space.shape[0], hidden_size).to(self.device)
+        # self.critic_target = QNetwork(n_agents, num_inputs, action_space.shape[0], hidden_size).to(self.device)
+        # self.critic_target = QVFN(n_agents, num_inputs, action_space.shape[0], hidden_size).to(self.device)
+        self.critic_target = QVFNMinimal(n_agents, num_inputs, action_space.shape[0], hidden_size).to(self.device)
+        # self.critic_target = QVFNKaiming(n_agents, num_inputs, action_space.shape[0], hidden_size).to(self.device)
         hard_update(self.critic_target, self.critic)
 
         if self.policy_type == "Gaussian":
@@ -78,10 +85,17 @@ class SAC(object):
             self.policy = GaussianPolicy(num_inputs, action_space.shape[0], hidden_size, action_space).to(self.device)
             self.policy_optim = Adam(self.policy.parameters(), lr=lr)
 
-        else:
+        elif self.policy_type == "Deterministic":
             self.alpha = 0
             self.automatic_entropy_tuning = False
             self.policy = DeterministicPolicy(num_inputs, action_space.shape[0], hidden_size, action_space).to(self.device)
+            self.policy_optim = Adam(self.policy.parameters(), lr=lr)
+        
+        
+        elif self.policy_type == "Discrete":
+            self.alpha = 0
+            self.automatic_entropy_tuning = False
+            self.policy = DiscretePolicy(num_inputs, action_space.shape[0], hidden_size, action_space).to(self.device)
             self.policy_optim = Adam(self.policy.parameters(), lr=lr)
 
     def select_action(self, state_batch, evaluate=False):
@@ -89,9 +103,15 @@ class SAC(object):
         actions = torch.zeros(
             self.n_agents,
             self.n_actions).to(self.device)
-        state_batch = torch.FloatTensor(state_batch).to(self.device) 
+        # print(state_batch.device)
+        if not torch.is_tensor(state_batch):
+            state_batch = torch.FloatTensor(state_batch)
+        if state_batch.device != self.device:
+            state_batch = state_batch.to(self.device)
+        # state_batch = torch.FloatTensor(state_batch).to(self.device) 
         for i in range(self.n_agents):
-            state = torch.FloatTensor(state_batch[i, :]).to(self.device).unsqueeze(0)
+            # state = torch.FloatTensor(state_batch[i, :]).to(self.device).unsqueeze(0)
+            state = state_batch[i, :].unsqueeze(0)
             if evaluate is False:
                 act, _, _ = self.policy.sample(state)
             else:
@@ -110,6 +130,7 @@ class SAC(object):
     def update_policy(self):
         if self.episode_done <= self.episodes_before_train:
             return None, None
+
 
         for agent in range(self.n_agents):
             state_batch, action_batch, reward_batch, next_state_batch, mask_batch = self.memory.sample(batch_size=self.batch_size)
@@ -132,17 +153,15 @@ class SAC(object):
                 
                 non_final_next_action, non_final_next_log_pi, _ = zip(*non_final_next_action_log_pi)
                 non_final_next_action = torch.stack(list(non_final_next_action)).transpose(0,1).to(self.device)
-                non_final_next_log_pi = torch.stack(list(non_final_next_log_pi)).transpose(0,1).to(self.device)
+                if self.policy_type == "Gaussian":
+                    non_final_next_log_pi = torch.stack(list(non_final_next_log_pi)).transpose(0,1).to(self.device)
+                else:
+                    non_final_next_log_pi = 0
 
                 qf1_next_target, qf2_next_target = torch.zeros(self.batch_size, 1).to(self.device), torch.zeros(self.batch_size, 1).to(self.device)
-                # print("test", qf1_next_target[mask_batch], qf2_next_target[mask_batch])
-                # print("non final next states view", non_final_next_states.view(-1, self.n_agents * self.n_states).shape)
-                # print("non final next action view", non_final_next_action.contiguous().view(-1, self.n_agents * self.n_actions).shape)
-                a, b = self.critic_target(non_final_next_states.view(-1, self.n_agents * self.n_states), non_final_next_action.contiguous().view(-1, self.n_agents * self.n_actions))
-                # print("a shape", a.shape)
-                # print("b shape", b.shape)
 
-                qf1_next_target[mask_batch], qf2_next_target[mask_batch] = self.critic_target(non_final_next_states.view(-1, self.n_agents * self.n_states), non_final_next_action.contiguous().view(-1, self.n_agents * self.n_actions))
+                # qf1_next_target[mask_batch], qf2_next_target[mask_batch] = self.critic_target(non_final_next_states.view(-1, self.n_agents * self.n_states), non_final_next_action.contiguous().view(-1, self.n_agents * self.n_actions))
+                qf1_next_target[mask_batch], qf2_next_target[mask_batch] = self.critic_target(non_final_next_states, non_final_next_action) # non final size * agent nums * observation size or action size
 
                 # print("qf1 next target shape", qf1_next_target.shape)
                 # print("qf2 next target shape", qf2_next_target.shape)
@@ -157,9 +176,10 @@ class SAC(object):
                 # next_q_value = reward_batch + mask_batch * self.gamma * (min_qf_next_target) # already masked...
                 # print("reward batch shape", reward_batch.shape)
                 # print("reward batch agent shape", reward_batch[:,agent].shape)
-                next_q_value = reward_batch[:,agent] + self.gamma * min_qf_next_target
+                next_q_value = reward_batch[:,agent] + mask_batch.unsqueeze(1) * self.gamma * min_qf_next_target
 
-            qf1, qf2 = self.critic(state_batch.view(-1, self.n_agents * self.n_states), action_batch.contiguous().view(-1, self.n_agents * self.n_actions))  # Two Q-functions to mitigate positive bias in the policy improvement step
+            # qf1, qf2 = self.critic(state_batch.view(-1, self.n_agents * self.n_states), action_batch.contiguous().view(-1, self.n_agents * self.n_actions))  # Two Q-functions to mitigate positive bias in the policy improvement step
+            qf1, qf2 = self.critic(state_batch, action_batch)  # Two Q-functions to mitigate positive bias in the policy improvement step
             # print("qf1 shape", qf1.shape)
             # print("next q value", next_q_value.shape)
             qf1_loss = F.mse_loss(qf1, next_q_value)  # JQ = 𝔼(st,at)~D[0.5(Q1(st,at) - r(st,at) - γ(𝔼st+1~p[V(st+1)]))^2]
@@ -179,10 +199,11 @@ class SAC(object):
             m[:, agent, :] = True
             # print("m", m)
             ac = ac.masked_scatter(m, pi.clone()).detach()
-            # print("ac1", ac)
+            # print("ac shape", ac.shape)
             whole_action = ac.view(self.batch_size, -1)
 
-            qf1_pi, qf2_pi = self.critic(state_batch.view(-1, self.n_agents * self.n_states), whole_action)
+            # qf1_pi, qf2_pi = self.critic(state_batch.view(-1, self.n_agents * self.n_states), whole_action)
+            qf1_pi, qf2_pi = self.critic(state_batch, ac)
             min_qf_pi = torch.min(qf1_pi, qf2_pi)
 
             policy_loss = ((self.alpha * log_pi) - min_qf_pi).mean() # Jπ = 𝔼st∼D,εt∼N[α * logπ(f(εt;st)|st) − Q(st,f(εt;st))]
@@ -211,11 +232,11 @@ class SAC(object):
         return qf1_loss.item(), qf2_loss.item(), policy_loss.item(), alpha_loss.item(), alpha_tlogs.item()
 
     # Save model parameters
-    def save_checkpoint(self, env_name, suffix="", ckpt_path=None):
+    def save_checkpoint(self, checkpoint_name, suffix="", ckpt_path=None):
         if not os.path.exists('checkpoints/'):
             os.makedirs('checkpoints/')
         if ckpt_path is None:
-            ckpt_path = "checkpoints/sac_checkpoint_{}_{}".format(env_name, suffix)
+            ckpt_path = "checkpoints/sac_checkpoint_{}_{}".format(checkpoint_name, suffix)
         print('Saving models to {}'.format(ckpt_path))
         torch.save({'policy_state_dict': self.policy.state_dict(),
                     'critic_state_dict': self.critic.state_dict(),
@@ -244,6 +265,6 @@ class SAC(object):
                 self.critic_target.train()
     
     def to_float_tensor(self, data):
-        FloatTensor = torch.cuda.FloatTensor if self.device[:4] == "cuda" else torch.FloatTensor
-        data = FloatTensor(data)
+        # FloatTensor = torch.cuda.FloatTensor if self.device[:4] == "cuda" else torch.FloatTensor
+        data = torch.FloatTensor(data).to(self.device)
         return data
