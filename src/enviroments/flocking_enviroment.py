@@ -241,6 +241,7 @@ class FlockEnviroment:
         self.position_kd_tree = KDTree(self.agent_positions, leafsize = self.neighbor_view_count)
         potential_pairs = self.position_kd_tree.query_pairs(2 * self.maximum_velocity, output_type="ndarray")
         self.agent_travel_distances += np.linalg.norm(self.agent_velocities, axis = 1)
+
         # Detect collisions with walls in this timestep. Decay and invert velocity in dimensions with a impact
         timestep_agent_collisions = np.zeros(self.num_agents)
         for dimension in range(self.dimensions):
@@ -257,6 +258,9 @@ class FlockEnviroment:
         timestep_position_intersects = intersects(timestep_position_segment_pairs)
         timestep_agent_collisions += np.bincount(potential_pairs[timestep_position_intersects].reshape(-1,), minlength=self.num_agents)
         self.reward_collection = -1 * timestep_agent_collisions
+
+        # self.reward_collection = self.agent_travel_distances
+
         # Subtract energy based on number of collisions (agent-agent, agent-wall) in this timestep
         self.agent_energies -= timestep_agent_collisions * self.impact_energy_cost
         # Perform convolution in swap array to spread airflow for this time step

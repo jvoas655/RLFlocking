@@ -14,8 +14,10 @@ def Sarsa(
     alpha:float, # step size
     QNet:QApproximationWithNN,
     num_episode:int,
+    eps:float,
     writer, # tensorboard writer
-    checkpoint_name:str
+    checkpoint_name:str,
+    test=False
 ) -> np.array:
     """
     Implement Sarsa
@@ -50,6 +52,7 @@ def Sarsa(
     # raise NotImplementedError()
     # collision_hist = []
     
+    reward_hist = []
     for episode in range(num_episode):
         print(episode, "/", num_episode)
         state = env.reset()
@@ -59,44 +62,62 @@ def Sarsa(
             # env.render()
             state, rewards, state_, done = env.step(action) # S, A, R, S'
             total_reward += rewards.sum()
-            action_ = epsilon_greedy_policy(num_agents, state_) # S, A, R, S', A'
+            if test:
+                action_ = epsilon_greedy_policy(num_agents, state_, epsilon=0.) # S, A, R, S', A'
+            else:
+                action_ = epsilon_greedy_policy(num_agents, state_, epsilon=eps) # S, A, R, S', A'
            
-            for agent in range(num_agents):
-                target = rewards[agent] + gamma * QNet(state_[agent], action_[agent]) - QNet(state[agent], action[agent])
-                QNet.update(state[agent], action[agent], target) 
+                for agent in range(num_agents):
+                    target = rewards[agent] + gamma * QNet(state_[agent], action_[agent]) - QNet(state[agent], action[agent])
+                    QNet.update(state[agent], action[agent], target) 
 
             action = action_
 
             if done:
                 break
         print("collisions:", env.episode_collisions)
-        writer.add_scalar('collision/train', env.episode_collisions, episode)
-        writer.add_scalar('reward/train', total_reward, episode)
-        # collision_hist.append(env.episode_collisions)
-        if (episode % 500 == 0):
-            QNet.save_checkpoint("SARSA", checkpoint_name + "_" + str(episode))
+        print("reward:", total_reward)
+        reward_hist.append(total_reward)
+
+        if not test:
+            writer.add_scalar('collision/train', env.episode_collisions, episode)
+            writer.add_scalar('reward/train', total_reward, episode)
+            # collision_hist.append(env.episode_collisions)
+            if (episode % 100 == 0):
+                QNet.save_checkpoint("SARSA", checkpoint_name + "_" + str(episode))
 
         # if (episode % 100 == 0):
         #     env.display_last_episode()
-
-    
-    QNet.save_checkpoint("SARSA", checkpoint_name + "_final")
-
+        # if test:
+        #     env.display_last_episode()
+    if not test:
+        QNet.save_checkpoint("SARSA", checkpoint_name + "_final")
+    else:
+        print("average reward", sum(reward_hist) / len(reward_hist))
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument("--num_agents", type=int, default=40)
     parser.add_argument("--num_episodes", type=int, default=1000)
     parser.add_argument("--gpuid", type=int, default=None)
+    parser.add_argument("--eps", type=float, default=0.05)
     parser.add_argument("--notes", type=str, default="")
+
+    parser.add_argument("--test", dest="test", action="store_true")
+    parser.set_defaults(test=False)
+    parser.add_argument("--loaded_checkpoint", type=str, default=None, help="path to checkpoint")
     args = parser.parse_args()
 
-
-    run_name = "{}_SARSA_{}_{}".format(datetime.datetime.now().strftime("%Y-%m-%d_%H-%M-%S"), str(args.num_agents), args.notes)
-    writer = SummaryWriter('runs/'+run_name)
-    checkpoint_name = run_name
-
+    if not args.test:
+        run_name = "{}_SARSA_{}_{}".format(datetime.datetime.now().strftime("%Y-%m-%d_%H-%M-%S"), str(args.num_agents), args.notes)
+        writer = SummaryWriter('runs/'+run_name)
+        checkpoint_name = run_name
+    else:
+        writer = None
+        checkpoint_name = None
 
     env = FlockEnviroment(args.num_agents)
     QNet = QApproximationWithNN(num_agents=args.num_agents, state_dims=env.get_observation_size(), action_dims=env.dimensions, device=get_device(args.gpuid))
-    Sarsa(env, gamma=0.9, num_agents=args.num_agents, alpha=0.01, QNet=QNet, num_episode=args.num_episodes, writer=writer, checkpoint_name = checkpoint_name)
+    if args.test:
+        QNet.load_checkpoint(args.loaded_checkpoint)
+    Sarsa(env, gamma=0.9, num_agents=args.num_agents, alpha=0.01, QNet=QNet, num_episode=args.num_episodes, eps=args.eps, writer=writer, checkpoint_name = checkpoint_name, test=args.test)

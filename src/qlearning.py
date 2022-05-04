@@ -14,7 +14,8 @@ def QLearning(
     QNet:QApproximationWithNN,
     num_episode:int,
     writer, # tensorboard writer
-    checkpoint_name # checkpoint name
+    checkpoint_name, # checkpoint name
+    test
 ) -> np.array:
 
     norm = 0.1
@@ -52,6 +53,7 @@ def QLearning(
     #TODO: implement this function
     # raise NotImplementedError()
     # collision_hist = []
+    reward_hist = []
     for episode in range(num_episode):
         print(episode, "/", num_episode)
         state = env.reset()
@@ -60,10 +62,11 @@ def QLearning(
             # env.render()
             action = epsilon_greedy_policy(num_agents, state, epsilon=.1) 
             state, rewards, state_, done = env.step(action) 
-            total_reward += rewards.sum() 
-            for agent in range(num_agents):
-                target = rewards[agent] + gamma * maxQ(state[agent]) - QNet(state[agent], action[agent])
-                QNet.update(state[agent], action[agent], target) 
+            total_reward += rewards.sum()
+            if not test:
+                for agent in range(num_agents):
+                    target = rewards[agent] + gamma * maxQ(state[agent]) - QNet(state[agent], action[agent])
+                    QNet.update(state[agent], action[agent], target) 
             
             state = state_
         
@@ -71,19 +74,23 @@ def QLearning(
                 break
         print("collisions:", env.episode_collisions)
         print("reward:", total_reward)
-        writer.add_scalar('collision/train', env.episode_collisions, episode)
-        writer.add_scalar('reward/train', total_reward, episode)
-        # collision_hist.append(env.episode_collisions)
-        
-        if (episode % 500 == 0):
-            QNet.save_checkpoint("Qlearning", checkpoint_name + "_" + str(episode))
+        if not test:
+            writer.add_scalar('collision/train', env.episode_collisions, episode)
+            writer.add_scalar('reward/train', total_reward, episode)
+            
+            if (episode % 100 == 0):
+                QNet.save_checkpoint("Qlearning", checkpoint_name + "_" + str(episode))
 
         # if (episode % 100 == 0):
         #     env.display_last_episode()
+        reward_hist.append(total_reward)
+        # if test:
+        #     env.display_last_episode()
 
-    
-    QNet.save_checkpoint("Qlearning", checkpoint_name + "_final")
-
+    if not test: 
+        QNet.save_checkpoint("Qlearning", checkpoint_name + "_final")
+    else: 
+        print("average reward:", sum(reward_hist) / len(reward_hist))
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
@@ -91,14 +98,26 @@ if __name__ == "__main__":
     parser.add_argument("--num_episodes", type=int, default=1000)
     parser.add_argument("--gpuid", type=int, default=None)
     parser.add_argument("--notes", type=str, default="")
-    
+   
+    parser.add_argument("--test", dest="test", action="store_true")
+    parser.set_defaults(test=False)
+    parser.add_argument("--loaded_checkpoint", type=str, default=None, help="path to checkpoint")
+
     args = parser.parse_args()
     env = FlockEnviroment(args.num_agents)
-    
-    run_name = "{}_QLEARNING_{}_{}".format(datetime.datetime.now().strftime("%Y-%m-%d_%H-%M-%S"), str(args.num_agents), args.notes)
-    writer = SummaryWriter('runs/'+run_name)
-    checkpoint_name = run_name
-
+   
 
     QNet = QApproximationWithNN(num_agents=args.num_agents, state_dims=env.get_observation_size(), action_dims=env.dimensions, device=get_device(args.gpuid))
-    QLearning(env, gamma=0.9, num_agents=args.num_agents, alpha=0.01, QNet=QNet, num_episode=args.num_episodes, writer=writer, checkpoint_name=checkpoint_name)
+    
+    if not args.test:
+        run_name = "{}_QLEARNING_{}_{}".format(datetime.datetime.now().strftime("%Y-%m-%d_%H-%M-%S"), str(args.num_agents), args.notes)
+        writer = SummaryWriter('runs/'+run_name)
+        checkpoint_name = run_name
+
+
+        QLearning(env, gamma=0.9, num_agents=args.num_agents, alpha=0.01, QNet=QNet, num_episode=args.num_episodes, writer=writer, checkpoint_name=checkpoint_name, test=args.test)
+
+    else:
+        QNet.load_checkpoint(args.loaded_checkpoint)
+        QLearning(env, gamma=0.9, num_agents=args.num_agents, alpha=0.01, QNet=QNet, num_episode=args.num_episodes, writer=None, checkpoint_name=None, test=args.test)
+
