@@ -24,9 +24,8 @@ def hard_update(target, source):
 class MADDPG:
     def __init__(self, n_agents, dim_obs, dim_act, batch_size,
                  capacity, episodes_before_train):
-        self.actors = [FFNA(dim_obs, dim_act) for i in range(n_agents)]
-        self.critics = [FFNC(n_agents, dim_obs,
-                               dim_act) for i in range(n_agents)]
+        self.actors = FFNA(dim_obs, dim_act)
+        self.critics = FFNC(n_agents, dim_obs, dim_act)
         self.actors_target = deepcopy(self.actors)
         self.critics_target = deepcopy(self.critics)
 
@@ -41,21 +40,15 @@ class MADDPG:
         self.GAMMA = 0.95
         self.tau = 0.01
 
-        self.var = [0.1 for i in range(n_agents)]
-        self.critic_optimizer = [Adam(x.parameters(),
-                                      lr=0.1) for x in self.critics]
-        self.actor_optimizer = [Adam(x.parameters(),
-                                     lr=0.01) for x in self.actors]
+        self.var = 0.1
+        self.critic_optimizer = Adam(self.critics.parameters(),lr=0.1)
+        self.actor_optimizer = Adam(self.actors.parameters(), lr=0.01)
 
         if self.use_cuda:
-            for x in self.actors:
-                x.cuda()
-            for x in self.critics:
-                x.cuda()
-            for x in self.actors_target:
-                x.cuda()
-            for x in self.critics_target:
-                x.cuda()
+            self.actors.cuda()
+            self.critics.cuda()
+            self.actors_target.cuda()
+            self.critics_target.cuda()
 
         self.steps_done = 0
         self.episode_done = 0
@@ -91,11 +84,11 @@ class MADDPG:
             # for current agent
             whole_state = state_batch.view(self.batch_size, -1)
             whole_action = action_batch.view(self.batch_size, -1).detach()
-            self.critic_optimizer[agent].zero_grad()
-            current_Q = self.critics[agent](whole_state, whole_action)
+            self.critic_optimizer.zero_grad()
+            current_Q = self.critics(whole_state, whole_action)
 
             non_final_next_actions = [
-                self.actors_target[i](non_final_next_states[:,
+                self.actors_target(non_final_next_states[:,
                                                             i,
                                                             :]) for i in range(
                                                                 self.n_agents)]
@@ -107,7 +100,7 @@ class MADDPG:
             target_Q = torch.zeros(
                 self.batch_size).type(FloatTensor)
 
-            target_Q[non_final_mask] = self.critics_target[agent](
+            target_Q[non_final_mask] = self.critics_target(
                 non_final_next_states.view(-1, self.n_agents * self.n_states),
                 non_final_next_actions.view(-1,
                                             self.n_agents * self.n_actions)
@@ -118,31 +111,30 @@ class MADDPG:
                 reward_batch[:, agent].unsqueeze(1) * 0.01)
             loss_Q = nn.MSELoss()(current_Q, target_Q.detach())
             loss_Q.backward()
-            self.critic_optimizer[agent].step()
+            self.critic_optimizer.step()
 
 
-            self.actor_optimizer[agent].zero_grad()
+            self.actor_optimizer.zero_grad()
             state_i = state_batch[:, agent, :]
-            action_i = self.actors[agent](state_i)
+            action_i = self.actors(state_i)
             ac = action_batch.clone()
             mask = torch.zeros(ac.shape, device=ac.device, dtype=torch.bool)
             mask[:, agent, :] = True
             ac = ac.masked_scatter(mask, action_i.clone()).detach()
             whole_action = ac.view(self.batch_size, -1)
-            actor_loss = -self.critics[agent](whole_state, whole_action)
+            actor_loss = -self.critics(whole_state, whole_action)
             actor_loss = actor_loss.mean()
 
             actor_loss.backward()
 
-            self.actor_optimizer[agent].step()
+            self.actor_optimizer.step()
 
             c_loss.append(loss_Q)
             a_loss.append(actor_loss)
 
         if self.steps_done % 100 == 0 and self.steps_done > 0:
-            for i in range(self.n_agents):
-                soft_update(self.critics_target[i], self.critics[i], self.tau)
-                soft_update(self.actors_target[i], self.actors[i], self.tau)
+            soft_update(self.critics_target, self.critics, self.tau)
+            soft_update(self.actors_target, self.actors, self.tau)
 
         return c_loss, a_loss
     def to_float_tensor(self, data):
@@ -159,16 +151,16 @@ class MADDPG:
         state_batch = FloatTensor(state_batch)
         for i in range(self.n_agents):
             sb = state_batch[i, :].detach()
-            act = self.actors[i](sb.unsqueeze(0)).squeeze()
-            #act = act + torch.from_numpy(
-                #(np.random.randn(2)) * self.var[i]).type(FloatTensor)
-            #act_norm = torch.clamp(torch.linalg.norm(act), min=1.0)
-            #act = torch.div(act, act_norm)
-            if self.episode_done > self.episodes_before_train and\
-               self.var[i] > 0.005:
-                self.var[i] *= 0.999998
+            act = self.actors(sb.unsqueeze(0)).squeeze()
+            act = act + torch.from_numpy(
+                (np.random.randn(2)) * self.var).type(FloatTensor)
+            act_norm = torch.clamp(torch.linalg.norm(act), min=1.0)
+            act = torch.div(act, act_norm)
+
             mask = torch.zeros(actions.shape, device=actions.device, dtype=torch.bool)
             mask[i, :] = True
             actions = actions.masked_scatter(mask, act.clone())
+        if self.episode_done > self.episodes_before_train and self.var > 0.005:
+            self.var *= 0.99999
         self.steps_done += 1
         return actions

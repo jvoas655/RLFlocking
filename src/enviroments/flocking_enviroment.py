@@ -47,14 +47,15 @@ class FlockEnviroment:
         self.airflow_conv_decay = 0.9 # Determines air flow spread factor
         self.velocity_time_decay = 0.5 # Determines time decay of velocity
         self.airflow_time_decay = 0.8 # Determines time decay of air flow
-        self.airflow_conv_spread = 1 # Determines air flow spread range
+        self.airflow_conv_spread = 10 # Determines air flow spread range
         self.impact_energy_cost = 0.10 # Energy cost per impact
         self.impact_velocity_decay = 0.9 # How much velocity is lost on collisions
-        self.neighbor_view_count = 10 # Number of nearest neighbors visible
+        self.neighbor_view_count = 6 # Number of nearest neighbors visible
         self.base_energy_cost = 0.01 # Base energy that is taken to move at each time time_step
         self.airflow_assist_factor = 0.9 # How much airflow can increase/decrease energy usage
-        self.maximum_velocity = 0.05
-        self.acceleration_scale = 0.1
+        self.maximum_velocity = 0.1
+        self.acceleration_scale = 0.05
+        self.collisions_enable = False
         self.dimensions = 2 # Keep at 2 for now
         if (physics_params):
             if ("airflow_bin_size" in physics_params):
@@ -167,6 +168,8 @@ class FlockEnviroment:
                 for neighbor in range(self.neighbor_view_count):
                     timestep_state[state_ind, :] = np.matmul(y_align_agent_rotation, ((self.agent_positions[timestep_neighbors[agent_ind, neighbor]] - self.agent_positions[agent_ind])))
                     state_ind += 1
+                    #dif = self.agent_positions[timestep_neighbors[agent_ind, neighbor]] - self.agent_positions[agent_ind]
+                    #self.reward_collection[agent_ind] += np.sqrt(dif.dot(dif)) ** 2
                     timestep_state[state_ind, :] = np.matmul(y_align_agent_rotation, self.agent_velocities[timestep_neighbors[agent_ind, neighbor]])
                     state_ind += 1
                 timestep_state = timestep_state.flatten()[1:] # Throw away zero velocity since its always rotated to be along [1, 0]
@@ -189,11 +192,14 @@ class FlockEnviroment:
     def step(self, actions):
         # Assume zero acceleration
         self.agent_accelerations[:, :] = 0
+        self.agent_energies_store = self.agent_energies.copy()
         for agent_ind in range(self.num_agents):
             if (self.agent_energies[agent_ind] > 0):
                 self.agent_accelerations[agent_ind, :] = np.matmul(self.inverse_rotations[agent_ind], actions[agent_ind, :])
                 #self.agent_accelerations[agent_ind, :] = actions[agent_ind, :]
         self.agent_accelerations *= self.acceleration_scale
+        self.agent_acceleration_norms = np.linalg.norm(self.agent_accelerations, axis=1)
+
                 # Should query model for acceleration decision and apply any limits here. May need to apply rotation afterwards here
                 # Pseudo random acceleration for now, with a bias towards center
                 #self.agent_accelerations[agent_ind, :] = (np.random.random(self.dimensions) - 0.5) * 0.01 + -1 * (self.agent_positions[agent_ind, :] - 0.5) * np.random.random(1) * 0.002
@@ -205,10 +211,13 @@ class FlockEnviroment:
         for agent_ind in range(self.num_agents):
             if (avd_acceleraton_dot_norm[agent_ind] != 0):
                 self.agent_airflow_incidence_angle[agent_ind] = np.dot(airflow_velocity_difference[agent_ind, :], self.agent_accelerations[agent_ind, :]) / avd_acceleraton_dot_norm[agent_ind]
-        # Deduct modified energy cost
-        self.agent_energies -= (self.base_energy_cost - (self.base_energy_cost * self.airflow_assist_factor * self.agent_airflow_incidence_angle))
         # Apply flat decay to velocity and add acceleration
-        self.agent_velocities = np.clip(self.velocity_time_decay * self.agent_velocities + self.agent_accelerations, -1 * self.maximum_velocity, self.maximum_velocity)
+        self.agent_velocities = self.velocity_time_decay * self.agent_velocities + self.agent_accelerations
+        agent_velocities_norms = np.linalg.norm(self.agent_velocities, axis=1)
+        clip_agent_velocities_norms = np.clip(agent_velocities_norms, a_max=None, a_min=self.maximum_velocity) / self.maximum_velocity
+        for agent_ind in range(self.num_agents):
+            self.agent_velocities[agent_ind, :] = self.agent_velocities[agent_ind, :] / clip_agent_velocities_norms[agent_ind]
+        #print(np.mean(clip_agent_velocities_norms))
         # Apply flat decay to entire airflow state
         self.airflow_store = self.airflow_time_decay * self.airflow_store
         # Transfer velocities from this timestep into the airflow approximation grid
@@ -216,27 +225,32 @@ class FlockEnviroment:
             self.airflow_store[self.timestep_agent_bin_locations[agent_ind, 0], self.timestep_agent_bin_locations[agent_ind, 1], :] += self.airflow_velocity_transfer * self.agent_velocities[agent_ind, :]
         # Update agent positions and travel distances, and update KDTree
         self.agent_positions += self.agent_velocities
-        self.position_kd_tree = KDTree(self.agent_positions, leafsize = self.neighbor_view_count)
-        potential_pairs = self.position_kd_tree.query_pairs(2 * self.maximum_velocity, output_type="ndarray")
-        self.agent_travel_distances += np.linalg.norm(self.agent_velocities, axis = 1)
+        if (self.collisions_enable):
+            self.position_kd_tree = KDTree(self.agent_positions, leafsize = self.neighbor_view_count)
+            potential_pairs = self.position_kd_tree.query_pairs(2 * self.maximum_velocity, output_type="ndarray")
+        agent_step_distance = np.linalg.norm(self.agent_velocities, axis = 1)
+        self.agent_travel_distances += agent_step_distance
+        # Deduct modified energy cost
+        self.agent_energies -= self.base_energy_cost * self.agent_acceleration_norms * self.airflow_assist_factor * self.agent_airflow_incidence_angle + self.base_energy_cost
         # Detect collisions with walls in this timestep. Decay and invert velocity in dimensions with a impact
-        timestep_agent_collisions = np.zeros(self.num_agents)
-        for dimension in range(self.dimensions):
-            timestep_wall_hits = np.where((self.agent_positions[:, dimension] > 1) | (self.agent_positions[:, dimension] < 0), True, False)
-            self.agent_velocities[:, dimension] = np.where(timestep_wall_hits, -1 * self.impact_velocity_decay * self.agent_velocities[:, dimension], self.agent_velocities[:, dimension])
-            timestep_agent_collisions += np.where(timestep_wall_hits, 1, 0)
+        if (self.collisions_enable):
+            timestep_agent_collisions = np.zeros(self.num_agents)
+            for dimension in range(self.dimensions):
+                timestep_wall_hits = np.where((self.agent_positions[:, dimension] > 1) | (self.agent_positions[:, dimension] < 0), True, False)
+                self.agent_velocities[:, dimension] = np.where(timestep_wall_hits, -1 * self.impact_velocity_decay * self.agent_velocities[:, dimension], self.agent_velocities[:, dimension])
+                timestep_agent_collisions += np.where(timestep_wall_hits, 1, 0)
         # Clip all positions without [0,1] bounds
         self.agent_positions = np.clip(self.agent_positions, 0, 1)
-        self.position_kd_tree = KDTree(self.agent_positions, leafsize = self.neighbor_view_count)
-        # Detect collisions between agents during this time step. No position/velocity modification applied
-        self.agent_step_segments = np.roll(self.agent_step_segments, self.dimensions, axis = 1)
-        self.agent_step_segments[:, self.dimensions:self.dimensions * 2] = self.agent_positions
-        timestep_position_segment_pairs = self.agent_step_segments[potential_pairs]
-        timestep_position_intersects = intersects(timestep_position_segment_pairs)
-        timestep_agent_collisions += np.bincount(potential_pairs[timestep_position_intersects].reshape(-1,), minlength=self.num_agents)
-        self.reward_collection = -1 * timestep_agent_collisions
-        # Subtract energy based on number of collisions (agent-agent, agent-wall) in this timestep
-        self.agent_energies -= timestep_agent_collisions * self.impact_energy_cost
+        if (self.collisions_enable):
+            self.position_kd_tree = KDTree(self.agent_positions, leafsize = self.neighbor_view_count)
+            # Detect collisions between agents during this time step. No position/velocity modification applied
+            self.agent_step_segments = np.roll(self.agent_step_segments, self.dimensions, axis = 1)
+            self.agent_step_segments[:, self.dimensions:self.dimensions * 2] = self.agent_positions
+            timestep_position_segment_pairs = self.agent_step_segments[potential_pairs]
+            timestep_position_intersects = intersects(timestep_position_segment_pairs)
+            timestep_agent_collisions += np.bincount(potential_pairs[timestep_position_intersects].reshape(-1,), minlength=self.num_agents)
+            # Subtract energy based on number of collisions (agent-agent, agent-wall) in this timestep
+            self.agent_energies -= timestep_agent_collisions * self.impact_energy_cost
         # Perform convolution in swap array to spread airflow for this time step
         for dx in range(-1 * self.airflow_conv_spread, self.airflow_conv_spread + 1):
             for dy in range(-1 * self.airflow_conv_spread, self.airflow_conv_spread + 1):
@@ -247,11 +261,12 @@ class FlockEnviroment:
         # Save airflow and positions for display
         self.airflow_sequence_store.append(self.airflow_store)
         self.posiiton_sequence_store.append(self.agent_positions)
-
+        # Calculate energy vs distance based reward
+        self.reward_collection = self.base_energy_cost * agent_step_distance - (self.agent_energies - self.agent_energies_store)
         # Make a copy of observations, actions, and rewards
         observation_collection_clone = self.observation_collection.copy()
         reward_collection_clone = self.reward_collection.copy()
-        self.episode_collisions += np.sum(timestep_agent_collisions)
+        #self.episode_collisions += np.sum(timestep_agent_collisions)
         # Clear collections and calculate next states
         self.calc_states()
 
