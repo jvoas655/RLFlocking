@@ -4,7 +4,8 @@ from models.critic import *
 import torch.nn.functional as F
 
 __activations__ = {
-    "relu": F.relu
+    "relu": F.relu,
+    "tanh": torch.tanh
 }
 
 class FFNC(Critic):

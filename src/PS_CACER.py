@@ -36,11 +36,10 @@ class PS_CACER:
         self.episodes_before_train = episodes_before_train
 
         self.GAMMA = 0.95
-        self.tau = 0.01
 
         self.var = 0.1
-        self.critic_optimizer = Adam(self.critic.parameters(),lr=0.01)
-        self.actor_optimizer = Adam(self.actor.parameters(), lr=0.001)
+        self.critic_optimizer = Adam(self.critic.parameters(),lr=0.0001)
+        self.actor_optimizer = Adam(self.actor.parameters(), lr=0.0001)
 
         if self.use_cuda:
             self.actor.cuda()
@@ -78,16 +77,16 @@ class PS_CACER:
             self.actor_optimizer.zero_grad()
             actor_loss = torch.div(torch.sum(torch.norm(torch.sub(temporal_actions.detach(), self.actor(temporal_states)), dim = 1)), len(temporal_buffer)).clone()
             actor_loss.backward()
+            print("---", "ACTOR Loss:", actor_loss.item())
             self.actor_optimizer.step()
 
-            self.critic_optimizer.zero_grad()
-            critic_loss = torch.div(torch.sum(torch.pow(torch.norm(deltas, dim=1), 2)), self.batch_size)
-            critic_loss.backward()
-            self.critic_optimizer.step()
+        self.critic_optimizer.zero_grad()
+        critic_loss = torch.div(torch.sum(torch.pow(torch.norm(deltas, dim=1), 2)), self.batch_size)
+        critic_loss.backward()
+        print("---", "CRITIC Loss:", critic_loss.item())
+        self.critic_optimizer.step()
 
-
-            #print(actor_loss)
-        #print(len(temporal_buffer), "/", self.batch_size)
+        print("---", "POS Samples:", len(temporal_buffer), "/", self.batch_size)
     def to_float_tensor(self, data):
         FloatTensor = torch.cuda.FloatTensor if self.use_cuda else torch.FloatTensor
         data = FloatTensor(data)
