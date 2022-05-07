@@ -40,7 +40,7 @@ class DDPG:
         self.GAMMA = 0.95
         self.tau = 0.01
 
-        self.var = 1.0
+        self.var = 0.5
         self.critic_optimizer = Adam(self.critic.parameters(),lr=0.0001)
         self.actor_optimizer = Adam(self.actor.parameters(), lr=0.0001)
 

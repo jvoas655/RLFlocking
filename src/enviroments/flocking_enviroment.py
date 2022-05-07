@@ -52,7 +52,7 @@ class FlockEnviroment:
         self.num_steps = 200
         self.enable_random_actions = False
         self.enable_dump_avoidance = False
-        self.neighbor_view_count = 10 # Number of nearest neighbors visible
+        self.neighbor_view_count = 8 # Number of nearest neighbors visible
         self.maneuverability = 0.7
         self.speed = 0.01
         self.center_reward_scale = 0.0
