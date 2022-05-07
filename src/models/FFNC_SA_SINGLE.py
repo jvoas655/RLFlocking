@@ -12,6 +12,7 @@ __activations__ = {
 class FFNC_SA_SINGLE(Critic):
     def __init__(self, num_obs, num_acts, activation = "leaky_relu"):
         super().__init__(1, num_obs, num_acts)
+        print(num_obs)
         self.activation = activation
         self.FC1 = nn.Linear(num_obs+num_acts, 64)
         self.FC2 = nn.Linear(64, 64)
