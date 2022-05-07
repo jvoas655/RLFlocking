@@ -63,14 +63,12 @@ class DDPG:
 
     def update_policy(self, exp = None):
         # do not train until exploration is enough
-        if self.episode_done <= self.episodes_before_train:
-            return None, None
+        if self.episode_done < self.episodes_before_train:
+            return 0, 0
 
         BoolTensor = torch.cuda.BoolTensor if self.use_cuda else torch.BoolTensor
         FloatTensor = torch.cuda.FloatTensor if self.use_cuda else torch.FloatTensor
 
-        c_loss = []
-        a_loss = []
         if (exp == None):
             transitions = self.memory.sample(self.batch_size)
         else:
@@ -86,19 +84,17 @@ class DDPG:
 
         critic_loss = self.critic_criterion(next_values, values)
         self.critic_optimizer.zero_grad()
-        c_loss.append(critic_loss.item())
         critic_loss.backward()
         self.critic_optimizer.step()
 
         actor_loss = -self.critic(states, self.actors[0](states)).mean()
         self.actor_optimizers[0].zero_grad()
-        a_loss.append(actor_loss.item())
         actor_loss.backward()
         self.actor_optimizers[0].step()
         soft_update(self.critic_target, self.critic, self.tau)
         soft_update(self.actor_targets[0], self.actors[0], self.tau)
-        #print("---", "CRITIC Loss:", sum(c_loss) / len(c_loss))
-        #print("---", "ACTOR Loss:", sum(a_loss) / len(a_loss))
+
+        return critic_loss.item(), actor_loss.item()
     def to_float_tensor(self, data):
         FloatTensor = torch.cuda.FloatTensor if self.use_cuda else torch.FloatTensor
         data = FloatTensor(data)

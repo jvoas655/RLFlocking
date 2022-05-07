@@ -1,6 +1,7 @@
 import numpy as np
 import matplotlib.pyplot as plt
 import matplotlib.animation as animation
+from matplotlib.lines import Line2D
 import math
 import time
 from sklearn.neighbors import NearestNeighbors
@@ -54,7 +55,6 @@ class FlockEnviroment:
         self.neighbor_view_count = 10 # Number of nearest neighbors visible
         self.maneuverability = 0.7
         self.speed = 0.01
-        self.acceleration_scale = 0.1
         self.center_reward_scale = 0.0
         self.mean_distance_reward_scale = 0.0
         self.collision_reward_scale = 1.0
@@ -67,7 +67,7 @@ class FlockEnviroment:
         self.enable_velocity_observation = True
         self.enable_position_neighbor_normalization = True
         self.enable_velocity_neighbor_observation = True
-        self.enable_acceleration_neighbor_observation = True
+        self.enable_acceleration_neighbor_observation = False
         self.dimensions = 2 # Keep at 2 for now
         # Get bin count based on bin size
         self.airflow_bin_count = int(1 / self.airflow_bin_size)
@@ -124,7 +124,8 @@ class FlockEnviroment:
         # Initialize arrays for post episode display
         self.airflow_sequence_store = [self.airflow_store]
         self.posiiton_sequence_store = [self.agent_positions]
-
+        self.velocity_sequence_store = [self.agent_velocities]
+        self.acceleration_sequence_store = [self.last_step_accelerations]
         self.calc_states()
 
         return self.observation_collection
@@ -316,6 +317,8 @@ class FlockEnviroment:
         if (self.enable_airflow):
             self.airflow_sequence_store.append(self.airflow_store)
         self.posiiton_sequence_store.append(self.agent_positions)
+        self.velocity_sequence_store.append(self.agent_velocities)
+        self.acceleration_sequence_store.append(self.last_step_accelerations)
         # Calculate reward
         self.reward_collection += self.collision_reward_scale * np.where(timestep_agent_collisions > 0, -1, 0) + self.center_reward_scale * np.where(np.linalg.norm(self.agent_positions - 0.5, axis=1) > np.linalg.norm(self.agent_positions - self.agent_velocities - 0.5, axis=1), -1, 0)
         # Make a copy of observations, actions, and rewards
@@ -333,7 +336,7 @@ class FlockEnviroment:
         if (self.time_step > self.num_steps):
             self.done = True
         return observation_collection_clone, reward_collection_clone, self.observation_collection, self.done
-    def display_last_episode(self, name = None):
+    def display_last_episode(self, title, name = None):
         X, Y = np.meshgrid(np.arange(0, self.airflow_bin_count), np.arange(0, self.airflow_bin_count))
         if (self.enable_airflow):
             fig, axes = plt.subplots(1, 2)
@@ -357,19 +360,34 @@ class FlockEnviroment:
             fig, axes = plt.subplots(1, 1)
             axes.set(adjustable='box', aspect='equal')
             L = axes.plot(self.posiiton_sequence_store[0][:, 0], self.posiiton_sequence_store[0][:, 1], 'o', 'black')[0]
-            axes.set_title("Agent Positions")
+
+            scale = 3
+            v_arrows = []
+            for ind in range(self.num_agents):
+                v_arrows.append(axes.arrow(self.posiiton_sequence_store[0][ind, 0], self.posiiton_sequence_store[0][ind, 1], scale * self.velocity_sequence_store[0][ind, 0], scale * self.velocity_sequence_store[0][ind, 1],color="b", width=0.003))
+            a_arrows = []
+            for ind in range(self.num_agents):
+                a_arrows.append(axes.arrow(self.posiiton_sequence_store[0][ind, 0], self.posiiton_sequence_store[0][ind, 1], self.speed * scale * self.acceleration_sequence_store[0][ind, 0], self.speed * scale * self.acceleration_sequence_store[0][ind, 1],color="r", width=0.003))
+
+            axes.set_title(title)
+            legend_elements = [Line2D([0], [0], color='b', lw=4, label='Vel'),
+                   Line2D([0], [0], color='r', lw=4, label='Acc')]
+            axes.legend(handles=legend_elements, bbox_to_anchor=(1.05, 1), loc='upper left', borderaxespad=0)
             axes.set_xlim(0, 1)
             axes.set_ylim(0, 1)
-            def update(i, L):
-                 #Q.set_UVC(self.airflow_sequence_store[i][:, :, 0].flatten(), self.airflow_sequence_store[i][:, :, 1].flatten())
-                 L.set_data(self.posiiton_sequence_store[i][:, 0], self.posiiton_sequence_store[i][:, 1])
-                 return [L]
-            animator = animation.FuncAnimation(fig, update, fargs=[L], frames = range(self.time_step), interval = 200, blit = False)
+            def update(i, L, v_arrows, a_arrows):
+                for ind in range(self.num_agents):
+                    v_arrows[ind].set_data(x=self.posiiton_sequence_store[i][ind, 0], y=self.posiiton_sequence_store[i][ind, 1], dx=scale * self.velocity_sequence_store[i][ind, 0], dy=scale * self.velocity_sequence_store[i][ind, 1])
+                    a_arrows[ind].set_data(x=self.posiiton_sequence_store[i][ind, 0], y=self.posiiton_sequence_store[i][ind, 1], dx=self.speed * scale * self.acceleration_sequence_store[i][ind, 0], dy=self.speed * scale * self.acceleration_sequence_store[i][ind, 1])
+                L.set_data(self.posiiton_sequence_store[i][:, 0], self.posiiton_sequence_store[i][:, 1])
+                return [L, v_arrows, a_arrows]
+            animator = animation.FuncAnimation(fig, update, fargs=[L, v_arrows, a_arrows], frames = range(self.time_step), interval = 200, blit = False)
         fig.tight_layout()
         if (name):
-            plt.savefig(name)
+            animator.save(name)
         else:
             plt.show()
+        plt.close(fig)
 
 
 if __name__ == "__main__":
