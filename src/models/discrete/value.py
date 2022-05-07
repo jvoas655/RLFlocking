@@ -81,7 +81,7 @@ class QApproximationWithNN():
         loss = 0.5 * self.loss_fn(q, G)
         loss.backward()
         self.optimizer.step()
-
+    """
     def save_checkpoint(self, algo, checkpoint_name, suffix="", ckpt_path=None):
         if not os.path.exists('checkpoints/'):
             os.makedirs('checkpoints/')
@@ -97,4 +97,4 @@ class QApproximationWithNN():
         if ckpt_path is not None:
             checkpoint = torch.load(ckpt_path)
             self.model.load_state_dict(checkpoint['qvalue_state_dict'])
-        
+    """  
