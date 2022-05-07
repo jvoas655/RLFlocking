@@ -59,7 +59,6 @@ class FlockEnviroment:
 
 
         """"""
-        self.with_boundary_observation = False 
 
         if (physics_params):
             if ("airflow_bin_size" in physics_params):
@@ -175,14 +174,6 @@ class FlockEnviroment:
                 timestep_state[state_ind, :] = np.matmul(y_align_agent_rotation, self.agent_airflows[agent_ind, :])
                 state_ind += 1
                 
-                """ Add distance to box boundaries
-                """
-                if self.with_boundary_observation:
-                    for d in range(self.dimensions):
-                        timestep_state[state_ind, :] = self.agent_positions[agent_ind][d] - 0.
-                        state_ind += 1
-                        timestep_state[state_ind, :] = self.agent_positions[agent_ind][d] - 1.
-                        state_ind += 1
 
 
 
@@ -259,7 +250,7 @@ class FlockEnviroment:
         timestep_agent_collisions += np.bincount(potential_pairs[timestep_position_intersects].reshape(-1,), minlength=self.num_agents)
         self.reward_collection = -1 * timestep_agent_collisions
 
-        # self.reward_collection = self.agent_travel_distances
+        # self.reward_collection = np.linalg.norm(self.agent_velocities, axis = 1)
 
         # Subtract energy based on number of collisions (agent-agent, agent-wall) in this timestep
         self.agent_energies -= timestep_agent_collisions * self.impact_energy_cost

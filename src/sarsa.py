@@ -1,11 +1,24 @@
 import numpy as np
 import argparse
 from enviroments.flocking_enviroment import *
+from enviroments.flocking_environment2 import *
 from models.discrete.value import QApproximationWithNN
 from torch.utils.tensorboard import SummaryWriter
 import datetime
 from utils.helpers import get_device
+from copy import deepcopy
 
+parser = argparse.ArgumentParser()
+parser.add_argument("--num_agents", type=int, default=40)
+parser.add_argument("--num_episodes", type=int, default=1000)
+parser.add_argument("--gpuid", type=int, default=None)
+parser.add_argument("--eps", type=float, default=0.05)
+parser.add_argument("--notes", type=str, default="")
+
+parser.add_argument("--test", dest="test", action="store_true")
+parser.set_defaults(test=False)
+parser.add_argument("--loaded_checkpoint", type=str, default=None, help="path to checkpoint")
+args = parser.parse_args()
 
 def Sarsa(
     env, # openai gym environment
@@ -16,8 +29,7 @@ def Sarsa(
     num_episode:int,
     eps:float,
     writer, # tensorboard writer
-    checkpoint_name:str,
-    test=False
+    checkpoint_name:str
 ) -> np.array:
     """
     Implement Sarsa
@@ -46,12 +58,25 @@ def Sarsa(
                 action[agent] = action_map[np.argmax(Q)]
 
         return action
+    
+    
+    def soft_update(target, source, t):
+        for target_param, source_param in zip(target.model.parameters(),
+                                              source.model.parameters()):
+            target_param.data.copy_(
+                (1 - t) * target_param.data + t * source_param.data)
+
+
+    def hard_update(target, source):
+        for target_param, source_param in zip(target.model.parameters(),
+                                              source.model.parameters()):
+            target_param.data.copy_(source_param.data)
 
 
     #TODO: implement this function
     # raise NotImplementedError()
     # collision_hist = []
-    
+    QNet_target = deepcopy(QNet) 
     reward_hist = []
     for episode in range(num_episode):
         print(episode, "/", num_episode)
@@ -62,13 +87,13 @@ def Sarsa(
             # env.render()
             state, rewards, state_, done = env.step(action) # S, A, R, S'
             total_reward += rewards.sum()
-            if test:
+            if args.test:
                 action_ = epsilon_greedy_policy(num_agents, state_, epsilon=0.) # S, A, R, S', A'
             else:
                 action_ = epsilon_greedy_policy(num_agents, state_, epsilon=eps) # S, A, R, S', A'
            
                 for agent in range(num_agents):
-                    target = rewards[agent] + gamma * QNet(state_[agent], action_[agent]) - QNet(state[agent], action[agent])
+                    target = rewards[agent] + gamma * QNet_target(state_[agent], action_[agent]) #  - QNet(state[agent], action[agent]) bug...
                     QNet.update(state[agent], action[agent], target) 
 
             action = action_
@@ -79,34 +104,26 @@ def Sarsa(
         print("reward:", total_reward)
         reward_hist.append(total_reward)
 
-        if not test:
+        if not args.test:
             writer.add_scalar('collision/train', env.episode_collisions, episode)
             writer.add_scalar('reward/train', total_reward, episode)
             # collision_hist.append(env.episode_collisions)
             if (episode % 100 == 0):
                 QNet.save_checkpoint("SARSA", checkpoint_name + "_" + str(episode))
+            
+            if (episode % 10 == 0 and episode != 0):
+                soft_update(QNet_target, QNet, 0.01)
 
         # if (episode % 100 == 0):
         #     env.display_last_episode()
-        # if test:
-        #     env.display_last_episode()
-    if not test:
+        if args.test:
+            env.display_last_episode()
+    if not args.test:
         QNet.save_checkpoint("SARSA", checkpoint_name + "_final")
     else:
         print("average reward", sum(reward_hist) / len(reward_hist))
 
 if __name__ == "__main__":
-    parser = argparse.ArgumentParser()
-    parser.add_argument("--num_agents", type=int, default=40)
-    parser.add_argument("--num_episodes", type=int, default=1000)
-    parser.add_argument("--gpuid", type=int, default=None)
-    parser.add_argument("--eps", type=float, default=0.05)
-    parser.add_argument("--notes", type=str, default="")
-
-    parser.add_argument("--test", dest="test", action="store_true")
-    parser.set_defaults(test=False)
-    parser.add_argument("--loaded_checkpoint", type=str, default=None, help="path to checkpoint")
-    args = parser.parse_args()
 
     if not args.test:
         run_name = "{}_SARSA_{}_{}".format(datetime.datetime.now().strftime("%Y-%m-%d_%H-%M-%S"), str(args.num_agents), args.notes)
@@ -117,7 +134,8 @@ if __name__ == "__main__":
         checkpoint_name = None
 
     env = FlockEnviroment(args.num_agents)
+    # env = FlockEnviroment2(args.num_agents)
     QNet = QApproximationWithNN(num_agents=args.num_agents, state_dims=env.get_observation_size(), action_dims=env.dimensions, device=get_device(args.gpuid))
     if args.test:
         QNet.load_checkpoint(args.loaded_checkpoint)
-    Sarsa(env, gamma=0.9, num_agents=args.num_agents, alpha=0.01, QNet=QNet, num_episode=args.num_episodes, eps=args.eps, writer=writer, checkpoint_name = checkpoint_name, test=args.test)
+    Sarsa(env, gamma=0.9, num_agents=args.num_agents, alpha=0.01, QNet=QNet, num_episode=args.num_episodes, eps=args.eps, writer=writer, checkpoint_name = checkpoint_name)
