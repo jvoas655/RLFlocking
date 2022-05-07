@@ -15,7 +15,7 @@ if __name__ == "__main__":
     #torch.random.manual_seed(0)
     #np.random.seed(0)
     # Arguments
-    test_string = "test"
+    test_string = "Baseline"
     dir_path = "..\\results\\" + "_".join(test_string.lower().split())
     if (os.path.exists(dir_path)):
         shutil.rmtree(dir_path)
@@ -27,7 +27,7 @@ if __name__ == "__main__":
     parser.add_argument("--memory_capacity", type=int, default=800000, help="Maximum number of memory replays to store.")
     parser.add_argument("--pre_train_eps", type=int, default=0, help="Number of episodes to run before starting training. Allows memory to be built up.")
     parser.add_argument("--eval_frequency", type=int, default=10, help="")
-    parser.add_argument("--eval_episodes", type=int, default=3, help="")
+    parser.add_argument("--eval_episodes", type=int, default=5, help="")
     parser.add_argument("--use_memory", action="store_true", default=False, help="")
     # Model arguments
     args = parser.parse_args()
@@ -36,7 +36,6 @@ if __name__ == "__main__":
 
     algo = DDPG(args.num_agents, env.get_observation_size(), env.dimensions, args.batch_size,
                  args.memory_capacity, args.pre_train_eps)
-    last_10_collisions = np.zeros(10)
 
     training_data_inds = {"Rewards":0, "Collisions":1, "Density":2, "Density2":3, "Critic":4, "Actor":5}
     training_data = np.zeros((len(training_data_inds), args.num_episodes))
@@ -78,14 +77,12 @@ if __name__ == "__main__":
         training_data[training_data_inds["Critic"], algo.episode_done] = np.mean(c_acum)
         training_data[training_data_inds["Actor"], algo.episode_done] = np.mean(a_acum)
         if (algo.episode_done % args.eval_frequency == 0):
-            eval_store = []
             collisions_store = []
             deviation_store = []
             square_deviation_store = []
             for eval in range(args.eval_episodes):
                 state = env.reset()
                 done = False
-                epi_store = []
                 collisions_store2 = []
                 deviation_store2 = []
                 square_deviation_store2 = []
@@ -93,7 +90,6 @@ if __name__ == "__main__":
                     actions = algo.select_action(algo.to_float_tensor(state), noise=False)
                     np_actions = np.array(list(map(lambda t: t.clone().detach().cpu().numpy(), actions)))
                     old_state, rewards, state, done = env.step(np_actions)
-                eval_store.append(np.sum(epi_store))
                 collisions_store.append(env.episode_collisions)
                 deviation_store.append(env.deviation)
                 square_deviation_store.append(env.square_deviation)
