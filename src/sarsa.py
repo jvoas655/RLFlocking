@@ -14,6 +14,7 @@ class Sarsa:
             dim_act:int,
 
             gamma:float = 0.9,
+            hidden:int = 32,
             # eps:float = 0.05,
             ):
         self.num_agents = num_agents
@@ -22,9 +23,9 @@ class Sarsa:
         self.gamma = gamma
         # self.eps = eps
 
-        self.QNet = QApproximationWithNN(num_agents=num_agents, state_dims=dim_obs, action_dims=dim_act, device="cpu")
-        self.QNet_target = QApproximationWithNN(num_agents=num_agents, state_dims=dim_obs, action_dims=dim_act, device="cpu")
-        # self.QNet_target = deepcopy(self.QNet)
+        self.QNet = QApproximationWithNN(num_agents=num_agents, state_dims=dim_obs, action_dims=dim_act, hidden_dim=hidden, device="cpu")
+        # self.QNet_target = QApproximationWithNN(num_agents=num_agents, state_dims=dim_obs, action_dims=dim_act, device="cpu")
+        self.QNet_target = deepcopy(self.QNet)
         self.tau = 0.01
 
         self.steps_done = 0

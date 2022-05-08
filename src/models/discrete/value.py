@@ -34,6 +34,7 @@ class QApproximationWithNN():
                  num_agents,
                  state_dims,
                  action_dims,
+                 hidden_dim,
                  device,
                  alpha=5e-5):
         """
@@ -42,7 +43,7 @@ class QApproximationWithNN():
         """
         # TODO: implement here
         self.device = device
-        self.model = QValueNN(num_agents, state_dims, action_dims).to(device)
+        self.model = QValueNN(num_agents, state_dims, action_dims, hidden_dim).to(device)
         self.optimizer = torch.optim.Adam(self.model.parameters(), lr=alpha, betas=(0.9, 0.999))
         self.loss_fn = nn.MSELoss()
 
