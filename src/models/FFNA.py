@@ -11,14 +11,14 @@ __activations__ = {
 }
 
 class FFNA(Actor):
-    def __init__(self, num_obs, num_actions, activation = "leaky_relu"):
+    def __init__(self, num_obs, num_actions, activation = "leaky_relu", hidden_size = 64):
         super().__init__(num_obs, num_actions)
         self.activation = activation
 
-        self.FC1 = nn.Linear(self.num_obs, 64)
-        self.FC2 = nn.Linear(64, 64)
-        self.FC3 = nn.Linear(64, 64)
-        self.FC4 = nn.Linear(64, self.num_actions)
+        self.FC1 = nn.Linear(self.num_obs, hidden_size)
+        self.FC2 = nn.Linear(hidden_size, hidden_size)
+        self.FC3 = nn.Linear(hidden_size, hidden_size)
+        self.FC4 = nn.Linear(hidden_size, self.num_actions)
 
     def forward(self, obs):
         #print("Actor")

@@ -185,7 +185,7 @@ class FlockEnviroment:
                 if (self.enable_rotation):
                     timestep_state[state_ind, :] = np.matmul(y_align_agent_rotation, self.agent_velocities[agent_ind])
                 else:
-                    timestep_state[state_ind, :] = self.agent_velocities[agent_ind, :] - 0.5
+                    timestep_state[state_ind, :] = self.agent_velocities[agent_ind, :]
                 state_ind += 1
 
             if (self.enable_airflow):
@@ -361,7 +361,7 @@ class FlockEnviroment:
             axes.set(adjustable='box', aspect='equal')
             L = axes.plot(self.posiiton_sequence_store[0][:, 0], self.posiiton_sequence_store[0][:, 1], 'o', 'black')[0]
 
-            scale = 3
+            scale = 2
             v_arrows = []
             for ind in range(self.num_agents):
                 v_arrows.append(axes.arrow(self.posiiton_sequence_store[0][ind, 0], self.posiiton_sequence_store[0][ind, 1], scale * self.velocity_sequence_store[0][ind, 0], scale * self.velocity_sequence_store[0][ind, 1],color="b", width=0.003))

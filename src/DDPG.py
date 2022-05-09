@@ -24,10 +24,10 @@ def hard_update(target, source):
 
 class DDPG:
     def __init__(self, n_agents, dim_obs, dim_act, batch_size,
-                 capacity, episodes_before_train):
-        self.actor = FFNA(dim_obs, dim_act)
+                 capacity, episodes_before_train, hidden_size):
+        self.actor = FFNA(dim_obs, dim_act, hidden_size = hidden_size)
         self.actor_target = deepcopy(self.actor)
-        self.critic = FFNC_SA_SINGLE(dim_obs, dim_act)
+        self.critic = FFNC_SA_SINGLE(dim_obs, dim_act, hidden_size = hidden_size)
         self.critic_target = deepcopy(self.critic)
         self.n_agents = n_agents
         self.n_states = dim_obs
@@ -37,10 +37,10 @@ class DDPG:
         self.use_cuda = torch.cuda.is_available()
         self.episodes_before_train = episodes_before_train
 
-        self.GAMMA = 0.95
+        self.GAMMA = 0.95 # OR hange me
         self.tau = 0.01
 
-        self.var = 0.5
+        self.var = 1.0 # Change me
         self.critic_optimizer = Adam(self.critic.parameters(),lr=0.0001)
         self.actor_optimizer = Adam(self.actor.parameters(), lr=0.0001)
 
@@ -59,11 +59,6 @@ class DDPG:
         # do not train until exploration is enough
         if self.episode_done < self.episodes_before_train:
             return 0, 0
-        if (self.episode_done == 100 or self.episode_done == 200):
-            for g in self.critic_optimizer.param_groups:
-                g['lr'] /= 3
-            for g in self.actor_optimizer.param_groups:
-                g['lr'] /= 3
 
         BoolTensor = torch.cuda.BoolTensor if self.use_cuda else torch.BoolTensor
         FloatTensor = torch.cuda.FloatTensor if self.use_cuda else torch.FloatTensor
@@ -92,11 +87,6 @@ class DDPG:
         self.actor_optimizer.step()
         soft_update(self.critic_target, self.critic, self.tau)
         soft_update(self.actor_target, self.actor, self.tau)
-        if (self.episode_done == 100 or self.episode_done == 200):
-            for g in self.critic_optimizer.param_groups:
-                g['lr'] /= 2
-            for g in self.actor_optimizer.param_groups:
-                g['lr'] /= 2
 
         return critic_loss.item(), actor_loss.item()
     def to_float_tensor(self, data):

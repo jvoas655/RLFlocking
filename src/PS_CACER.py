@@ -37,7 +37,7 @@ class PS_CACER:
 
         self.GAMMA = 0.95
 
-        self.var = 0.1
+        self.var = 1.0
         self.critic_optimizer = Adam(self.critic.parameters(),lr=0.0001)
         self.actor_optimizer = Adam(self.actor.parameters(), lr=0.0001)
 
@@ -48,17 +48,20 @@ class PS_CACER:
         self.episode_done = 0
         #torch.autograd.set_detect_anomaly(True)
 
-    def update_policy(self):
+    def update_policy(self, exp = None):
         # do not train until exploration is enough
         if self.episode_done <= self.episodes_before_train:
-            return None, None
+            return 0, 0
 
         BoolTensor = torch.cuda.BoolTensor if self.use_cuda else torch.BoolTensor
         FloatTensor = torch.cuda.FloatTensor if self.use_cuda else torch.FloatTensor
 
         c_loss = []
         a_loss = []
-        transitions = self.memory.sample(self.batch_size)
+        if (exp == None):
+            transitions = self.memory.sample(self.batch_size)
+        else:
+            transitions = random.sample(exp, self.batch_size)
         temporal_buffer = []
         deltas = []
         for transition_ind in range(len(transitions)):
@@ -77,16 +80,17 @@ class PS_CACER:
             self.actor_optimizer.zero_grad()
             actor_loss = torch.div(torch.sum(torch.norm(torch.sub(temporal_actions.detach(), self.actor(temporal_states)), dim = 1)), len(temporal_buffer)).clone()
             actor_loss.backward()
-            print("---", "ACTOR Loss:", actor_loss.item())
             self.actor_optimizer.step()
 
         self.critic_optimizer.zero_grad()
         critic_loss = torch.div(torch.sum(torch.pow(torch.norm(deltas, dim=1), 2)), self.batch_size)
         critic_loss.backward()
-        print("---", "CRITIC Loss:", critic_loss.item())
         self.critic_optimizer.step()
 
-        print("---", "POS Samples:", len(temporal_buffer), "/", self.batch_size)
+        if (len(temporal_buffer)):
+            return critic_loss.item(), actor_loss.item()
+        else:
+            return critic_loss.item(), 0
     def to_float_tensor(self, data):
         FloatTensor = torch.cuda.FloatTensor if self.use_cuda else torch.FloatTensor
         data = FloatTensor(data)

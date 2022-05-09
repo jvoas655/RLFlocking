@@ -15,28 +15,30 @@ if __name__ == "__main__":
     #torch.random.manual_seed(0)
     #np.random.seed(0)
     # Arguments
-    test_string = "Baseline"
+    test_string = "test"  # Change me!
     dir_path = "..\\results\\" + "_".join(test_string.lower().split())
     if (os.path.exists(dir_path)):
         shutil.rmtree(dir_path)
     os.mkdir(dir_path)
     parser = argparse.ArgumentParser()
-    parser.add_argument("--num_agents", type=int, default=30)
+    parser.add_argument("--num_agents", type=int, default=40)
     parser.add_argument("--num_episodes", type=int, default=251)
     parser.add_argument("--batch_size", type=int, default=256)
     parser.add_argument("--memory_capacity", type=int, default=800000, help="Maximum number of memory replays to store.")
     parser.add_argument("--pre_train_eps", type=int, default=0, help="Number of episodes to run before starting training. Allows memory to be built up.")
     parser.add_argument("--eval_frequency", type=int, default=10, help="")
     parser.add_argument("--eval_episodes", type=int, default=5, help="")
+    parser.add_argument("--hidden_size", type=int, default=64, help="")
     parser.add_argument("--use_memory", action="store_true", default=False, help="")
     # Model arguments
     args = parser.parse_args()
-
     env = FlockEnviroment(args.num_agents)
 
     algo = DDPG(args.num_agents, env.get_observation_size(), env.dimensions, args.batch_size,
-                 args.memory_capacity, args.pre_train_eps)
+                 args.memory_capacity, args.pre_train_eps, args.hidden_size)
 
+    env.center_reward_scale = 1
+    env.collision_reward_scale = 0
     training_data_inds = {"Rewards":0, "Collisions":1, "Density":2, "Density2":3, "Critic":4, "Actor":5}
     training_data = np.zeros((len(training_data_inds), args.num_episodes))
 
@@ -44,6 +46,11 @@ if __name__ == "__main__":
     eval_data = np.zeros((len(eval_data_inds), int(args.num_episodes / args.eval_frequency) + 1))
     while (algo.episode_done < args.num_episodes):
         print("Episode:", algo.episode_done, "/", args.num_episodes)
+        if (algo.episode_done == 50):
+            env.center_reward_scale = 0.0
+            env.collision_reward_scale = 1.0
+            if (args.use_memory):
+                algo.memory.clear()
         state = env.reset()
         done = False
         reward_acum = []
@@ -69,7 +76,6 @@ if __name__ == "__main__":
                 c, a = algo.update_policy()
                 c_acum.append(c)
                 a_acum.append(a)
-                print("---", "Memory:",len(algo.memory), "/", args.memory_capacity)
             else:
                 c, a = algo.update_policy(exps)
                 c_acum.append(c)
