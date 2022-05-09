@@ -1,7 +1,10 @@
 # RLFlocking
-A Reinforcement Learning base Flocking Project
+A Reinforcement Learning based Flocking Project
 
-This is the discrete policy branch of our project. Some of the code is borrowed from the programming assignment's skeleton code.
+
+![](demo.gif)
+
+This is the discrete policy branch of our project. Some of the code structure is borrowed from the programming assignment's skeleton code and this [repository](https://github.com/xuehy/pytorch-maddpg/).
 
 To run the Sarsa baseline:
 ```
